@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+openai
+tiktoken
+httpx
+aiohttp
+Pillow
+python-multipart
