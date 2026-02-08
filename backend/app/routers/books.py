@@ -11,10 +11,13 @@ from app.schemas import (
     BookImportRequest,
     BookResponse,
     BookAnalyzeRequest,
+    AnalyzeStatusResponse,
     StatusResponse,
     ReadingProgressResponse,
     ReadingProgressUpdate,
     ChunkResponse,
+    CharacterResponse,
+    LocationResponse,
 )
 from app import crud
 from app.services.book_service import (
@@ -23,6 +26,7 @@ from app.services.book_service import (
     guess_title,
     chunk_text,
 )
+from app.services.ai_service import run_full_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +150,157 @@ def chunk_book(book_id: int, db: Session = Depends(get_db)):
         status="chunked",
         message=f"Created {len(chunks_data)} chunks",
     )
+
+
+# ---------------------------------------------------------------------------
+# AI Analysis
+# ---------------------------------------------------------------------------
+
+@router.post("/books/{book_id}/analyze", response_model=AnalyzeStatusResponse)
+def analyze_book(
+    book_id: int,
+    req: BookAnalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Run AI analysis on a book: extract characters, locations, dramatic moments.
+    Also creates the visual bible and links chunk metadata.
+    """
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    chunks_db = crud.get_chunks_by_book(db, book_id)
+    if not chunks_db:
+        raise HTTPException(
+            status_code=400,
+            detail="Book has no chunks. Call /chunk first.",
+        )
+
+    # Update book metadata from the request
+    crud.update_book(
+        db,
+        book_id,
+        author=req.author,
+        is_well_known=1 if req.is_well_known else 0,
+        status="analyzing",
+    )
+
+    # Prepare chunk dicts for the AI service
+    chunks_for_ai = [
+        {"chunk_index": c.chunk_index, "text": c.text} for c in chunks_db
+    ]
+
+    # Run the full analysis pipeline (synchronous for MVP)
+    try:
+        result = run_full_analysis(chunks_for_ai)
+    except Exception as exc:
+        crud.update_book_status(db, book_id, "error")
+        logger.error("Analysis failed for book %s: %s", book_id, exc)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}")
+
+    # ----- Persist characters -----
+    char_name_to_id: dict[str, int] = {}
+    for ch_data in result.get("main_characters", []):
+        char = crud.create_character(
+            db,
+            book_id=book_id,
+            name=ch_data.get("name", "Unknown"),
+            physical_description=ch_data.get("physical_description"),
+            personality_traits=ch_data.get("personality_traits"),
+            typical_emotions=", ".join(ch_data.get("typical_emotions", [])),
+        )
+        char_name_to_id[char.name.lower()] = char.id
+
+    # ----- Persist locations -----
+    loc_name_to_id: dict[str, int] = {}
+    for loc_data in result.get("main_locations", []):
+        loc = crud.create_location(
+            db,
+            book_id=book_id,
+            name=loc_data.get("name", "Unknown"),
+            visual_description=loc_data.get("visual_description"),
+            atmosphere=loc_data.get("atmosphere"),
+        )
+        loc_name_to_id[loc.name.lower()] = loc.id
+
+    # ----- Create visual bible -----
+    tone = result.get("tone_and_style", {})
+    crud.create_visual_bible(
+        db,
+        book_id=book_id,
+        style_category=req.style_category,
+        tone_description=(
+            f"{tone.get('genre', '')} | {tone.get('mood', '')} | "
+            f"{tone.get('visual_style', '')}"
+        ),
+        illustration_frequency=req.illustration_frequency,
+        layout_style=req.layout_style,
+    )
+
+    # ----- Enrich chunks with character/location links + dramatic scores -----
+    chunk_index_to_db_id = {c.chunk_index: c.id for c in chunks_db}
+
+    for ca in result.get("chunk_analyses", []):
+        idx = ca.get("chunk_index")
+        db_chunk_id = chunk_index_to_db_id.get(idx)
+        if db_chunk_id is None:
+            continue
+
+        # Dramatic score
+        score = ca.get("dramatic_score")
+        if score is not None:
+            crud.update_chunk_dramatic_score(db, db_chunk_id, float(score))
+
+        # Link characters
+        char_ids = []
+        for name in ca.get("characters_present", []):
+            cid = char_name_to_id.get(name.lower())
+            if cid:
+                char_ids.append(cid)
+        if char_ids:
+            crud.link_chunk_characters(db, db_chunk_id, char_ids)
+
+        # Link locations
+        loc_ids = []
+        for name in ca.get("locations_present", []):
+            lid = loc_name_to_id.get(name.lower())
+            if lid:
+                loc_ids.append(lid)
+        if loc_ids:
+            crud.link_chunk_locations(db, db_chunk_id, loc_ids)
+
+    crud.update_book_status(db, book_id, "ready")
+
+    logger.info(
+        "Analysis complete for book %s: %d characters, %d locations",
+        book_id,
+        len(char_name_to_id),
+        len(loc_name_to_id),
+    )
+    return AnalyzeStatusResponse(status="ready", estimated_time=0)
+
+
+# ---------------------------------------------------------------------------
+# Characters & locations (read)
+# ---------------------------------------------------------------------------
+
+@router.get("/books/{book_id}/characters", response_model=list[CharacterResponse])
+def get_characters(book_id: int, db: Session = Depends(get_db)):
+    """Get all characters extracted for a book."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return crud.get_characters_by_book(db, book_id)
+
+
+@router.get("/books/{book_id}/locations", response_model=list[LocationResponse])
+def get_locations(book_id: int, db: Session = Depends(get_db)):
+    """Get all locations extracted for a book."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return crud.get_locations_by_book(db, book_id)
 
 
 # ---------------------------------------------------------------------------
