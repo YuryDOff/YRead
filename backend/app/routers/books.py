@@ -1,5 +1,6 @@
 """Book-related API endpoints."""
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +21,7 @@ from app.services.book_service import (
     download_text_from_google_drive,
     compute_metadata,
     guess_title,
+    chunk_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,55 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     if not crud.delete_book(db, book_id):
         raise HTTPException(status_code=404, detail="Book not found")
     return StatusResponse(status="deleted", message=f"Book {book_id} deleted")
+
+
+# ---------------------------------------------------------------------------
+# Chunking
+# ---------------------------------------------------------------------------
+
+@router.post("/books/{book_id}/chunk", response_model=StatusResponse)
+def chunk_book(book_id: int, db: Session = Depends(get_db)):
+    """Split book text into overlapping chunks and store in DB."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    if not book.file_path or not os.path.isfile(book.file_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Book text file not found. Import the book first.",
+        )
+
+    # Read raw text
+    with open(book.file_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # Delete existing chunks (idempotent re-chunk)
+    existing = crud.get_chunks_by_book(db, book_id)
+    if existing:
+        for c in existing:
+            db.delete(c)
+        db.commit()
+
+    chunks_data = chunk_text(text)
+    crud.create_chunks_batch(db, book_id, chunks_data)
+
+    # Update book metadata
+    total_pages = max(
+        (cd["end_page"] for cd in chunks_data), default=book.total_pages or 1
+    )
+    crud.update_book(db, book_id, total_pages=total_pages, status="chunked")
+
+    logger.info(
+        "Book %s chunked into %d chunks (%d pages)",
+        book_id,
+        len(chunks_data),
+        total_pages,
+    )
+    return StatusResponse(
+        status="chunked",
+        message=f"Created {len(chunks_data)} chunks",
+    )
 
 
 # ---------------------------------------------------------------------------
