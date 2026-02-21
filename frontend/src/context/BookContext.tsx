@@ -1,25 +1,29 @@
 /**
- * Global state for the current book session.
+ * Global state for the author's book creation workflow.
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import type { Book, Character, Location, VisualBible, ReferenceImages } from '../services/api';
 
-interface BookState {
+interface AuthorWorkflowState {
   book: Book | null;
   characters: Character[];
   locations: Location[];
   visualBible: VisualBible | null;
   referenceImages: ReferenceImages | null;
 
-  /* Style selections (from SetupPage before analyze) */
+  /* Style selections (from CreateBookPage before analyze) */
   styleCategory: string;
   illustrationFrequency: number;
   layoutStyle: string;
   isWellKnown: boolean;
   authorName: string;
+  wellKnownBookTitle: string;
+  similarBookTitle: string;
+  mainOnlyReferences: boolean;
+  sceneCount: number;
 }
 
-interface BookContextValue extends BookState {
+interface AuthorWorkflowContextValue extends AuthorWorkflowState {
   setBook: (book: Book | null) => void;
   setCharacters: (chars: Character[]) => void;
   setLocations: (locs: Location[]) => void;
@@ -30,10 +34,14 @@ interface BookContextValue extends BookState {
   setLayoutStyle: (s: string) => void;
   setIsWellKnown: (b: boolean) => void;
   setAuthorName: (s: string) => void;
+  setWellKnownBookTitle: (s: string) => void;
+  setSimilarBookTitle: (s: string) => void;
+  setMainOnlyReferences: (b: boolean) => void;
+  setSceneCount: (n: number) => void;
   reset: () => void;
 }
 
-const defaults: BookState = {
+const defaults: AuthorWorkflowState = {
   book: null,
   characters: [],
   locations: [],
@@ -44,17 +52,21 @@ const defaults: BookState = {
   layoutStyle: 'inline_classic',
   isWellKnown: false,
   authorName: '',
+  wellKnownBookTitle: '',
+  similarBookTitle: '',
+  mainOnlyReferences: true,
+  sceneCount: 10,
 };
 
-const BookContext = createContext<BookContextValue | undefined>(undefined);
+const AuthorWorkflowContext = createContext<AuthorWorkflowContextValue | undefined>(undefined);
 
-export function BookProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<BookState>(defaults);
+export function AuthorWorkflowProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AuthorWorkflowState>(defaults);
 
-  const patch = (partial: Partial<BookState>) =>
+  const patch = (partial: Partial<AuthorWorkflowState>) =>
     setState((prev) => ({ ...prev, ...partial }));
 
-  const value: BookContextValue = {
+  const value: AuthorWorkflowContextValue = {
     ...state,
     setBook: (book) => patch({ book }),
     setCharacters: (characters) => patch({ characters }),
@@ -66,14 +78,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
     setLayoutStyle: (layoutStyle) => patch({ layoutStyle }),
     setIsWellKnown: (isWellKnown) => patch({ isWellKnown }),
     setAuthorName: (authorName) => patch({ authorName }),
+    setWellKnownBookTitle: (wellKnownBookTitle) => patch({ wellKnownBookTitle }),
+    setSimilarBookTitle: (similarBookTitle) => patch({ similarBookTitle }),
+    setMainOnlyReferences: (mainOnlyReferences) => patch({ mainOnlyReferences }),
+    setSceneCount: (sceneCount) => patch({ sceneCount }),
     reset: () => setState(defaults),
   };
 
-  return <BookContext.Provider value={value}>{children}</BookContext.Provider>;
+  return <AuthorWorkflowContext.Provider value={value}>{children}</AuthorWorkflowContext.Provider>;
 }
 
-export function useBook(): BookContextValue {
-  const ctx = useContext(BookContext);
-  if (!ctx) throw new Error('useBook must be used within <BookProvider>');
+export function useBook(): AuthorWorkflowContextValue {
+  const ctx = useContext(AuthorWorkflowContext);
+  if (!ctx) throw new Error('useBook must be used within <AuthorWorkflowProvider>');
   return ctx;
 }

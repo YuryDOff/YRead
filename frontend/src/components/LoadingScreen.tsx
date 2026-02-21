@@ -7,8 +7,6 @@ const ANALYSIS_MESSAGES = [
   'Identifying key characters...',
   'Mapping dramatic moments...',
   'Extracting locations...',
-  'Building visual bible...',
-  'Searching reference images...',
 ];
 
 const GENERATION_MESSAGES = [
@@ -21,10 +19,12 @@ const GENERATION_MESSAGES = [
 
 interface Props {
   mode: 'analysis' | 'generation';
+  /** When set (analysis mode), shows chunk progress bar. */
+  analysisProgress?: { currentChunk: number; totalChunks: number } | null;
   onCancel?: () => void;
 }
 
-export default function LoadingScreen({ mode, onCancel }: Props) {
+export default function LoadingScreen({ mode, analysisProgress, onCancel }: Props) {
   const messages = mode === 'analysis' ? ANALYSIS_MESSAGES : GENERATION_MESSAGES;
   const [msgIdx, setMsgIdx] = useState(0);
 
@@ -63,9 +63,52 @@ export default function LoadingScreen({ mode, onCancel }: Props) {
         </AnimatePresence>
       </div>
 
+      {/* Progress (analysis only): show indeterminate until we have chunk counts */}
+      {mode === 'analysis' && (
+        <div className="w-full max-w-xs space-y-1">
+          {analysisProgress && analysisProgress.totalChunks > 0 ? (
+            <>
+              <div className="h-2 w-full rounded-full bg-sepia/15 overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-golden"
+                  initial={{ width: 0 }}
+                  animate={{
+                    width: `${Math.min(
+                      100,
+                      (100 * analysisProgress.currentChunk) / analysisProgress.totalChunks,
+                    )}%`,
+                  }}
+                  transition={{ duration: 0.4 }}
+                />
+              </div>
+              <p className="font-ui text-xs text-sepia text-center">
+                Chunk {analysisProgress.currentChunk} of {analysisProgress.totalChunks}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="h-2 w-full rounded-full bg-sepia/15 overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-golden/70"
+                  animate={{ width: ['20%', '60%', '20%'] }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    repeatType: 'reverse',
+                  }}
+                />
+              </div>
+              <p className="font-ui text-xs text-sepia text-center">
+                Preparing analysis…
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       <p className="font-ui text-xs text-sepia">
         {mode === 'analysis'
-          ? 'This usually takes 2–5 minutes'
+          ? 'This can take 3–15 minutes for long books. Do not close the tab.'
           : 'Generating your first illustrations...'}
       </p>
 

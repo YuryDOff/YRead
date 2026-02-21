@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   BookOpen, Wand2, Heart, Rocket, Sword, Star, Feather,
   Loader2,
@@ -10,6 +10,8 @@ const STYLES = [
   { id: 'fiction', label: 'Fiction', desc: 'Versatile, balanced', icon: Wand2 },
   { id: 'romance', label: 'Romance', desc: 'Soft, dreamy', icon: Heart },
   { id: 'sci_fi', label: 'Sci-Fi', desc: 'Futuristic, vibrant', icon: Rocket },
+  { id: 'cyberpunk', label: 'Cyberpunk', desc: 'Neon, tech-noir', icon: Rocket },
+  { id: 'space_opera', label: 'Space Opera', desc: 'Epic space, cosmic', icon: Rocket },
   { id: 'fantasy', label: 'Fantasy', desc: 'Epic, painterly', icon: Sword },
   { id: 'fairy_tale', label: 'Fairy Tale', desc: 'Whimsical, storybook', icon: Star },
   { id: 'classic', label: 'Classic Lit', desc: 'Vintage, engraving-style', icon: Feather },
@@ -36,6 +38,27 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
   const [layout, setLayout] = useState(ctx.layoutStyle);
   const [wellKnown, setWellKnown] = useState(ctx.isWellKnown);
   const [author, setAuthor] = useState(ctx.authorName);
+  const [wellKnownTitle, setWellKnownTitle] = useState(ctx.wellKnownBookTitle);
+  const [hasSimilarBook, setHasSimilarBook] = useState(!!ctx.similarBookTitle);
+  const [similarBookTitle, setSimilarBookTitle] = useState(ctx.similarBookTitle);
+  const [mainOnly, setMainOnly] = useState(ctx.mainOnlyReferences);
+  const [sceneCount, setSceneCount] = useState(ctx.sceneCount);
+
+  // Sync from context when VB loads (e.g. opening existing book)
+  useEffect(() => {
+    if (ctx.book) {
+      setSelected(ctx.styleCategory);
+      setFreq(ctx.illustrationFrequency);
+      setLayout(ctx.layoutStyle);
+      setWellKnown(ctx.isWellKnown);
+      setAuthor(ctx.authorName);
+      setWellKnownTitle(ctx.wellKnownBookTitle);
+      setHasSimilarBook(!!ctx.similarBookTitle);
+      setSimilarBookTitle(ctx.similarBookTitle);
+      setMainOnly(ctx.mainOnlyReferences);
+      setSceneCount(ctx.sceneCount);
+    }
+  }, [ctx.book?.id, ctx.styleCategory, ctx.illustrationFrequency, ctx.layoutStyle, ctx.isWellKnown, ctx.authorName, ctx.wellKnownBookTitle, ctx.similarBookTitle, ctx.mainOnlyReferences, ctx.sceneCount]);
 
   const totalIllustrations = Math.max(1, Math.ceil(totalPages / freq));
 
@@ -45,6 +68,10 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
     ctx.setLayoutStyle(layout);
     ctx.setIsWellKnown(wellKnown);
     ctx.setAuthorName(author);
+    ctx.setWellKnownBookTitle(wellKnownTitle);
+    ctx.setSimilarBookTitle(hasSimilarBook ? similarBookTitle : '');
+    ctx.setMainOnlyReferences(mainOnly);
+    ctx.setSceneCount(sceneCount);
     onSubmit();
   }
 
@@ -52,7 +79,7 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
     <div className="w-full max-w-2xl space-y-8">
       <div className="text-center space-y-1">
         <h2 className="font-display text-3xl font-semibold text-charcoal">
-          Customize Your Experience
+          Key Parameters
         </h2>
         <p className="text-sepia font-body text-sm">
           {ctx.book?.title} — {totalPages} pages
@@ -73,17 +100,66 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
           </span>
         </label>
         {wellKnown && (
-          <input
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder="Author name (optional)"
-            className="w-full px-3 py-2 rounded-lg border border-sepia/25 bg-white/70
-                       font-ui text-sm focus:outline-none focus:ring-2 focus:ring-golden/40"
-          />
+          <div className="space-y-2">
+            <input
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              placeholder="Author name (optional)"
+              className="w-full px-3 py-2 rounded-lg border border-sepia/25 bg-white/70
+                         font-ui text-sm focus:outline-none focus:ring-2 focus:ring-golden/40"
+            />
+            <input
+              value={wellKnownTitle}
+              onChange={(e) => setWellKnownTitle(e.target.value)}
+              placeholder="Title of the book (e.g. A Study in Scarlet)"
+              className="w-full px-3 py-2 rounded-lg border border-sepia/25 bg-white/70
+                         font-ui text-sm focus:outline-none focus:ring-2 focus:ring-golden/40"
+            />
+          </div>
         )}
         <p className="text-xs text-sepia/70 font-ui">
           This helps find better reference images for characters and locations
         </p>
+
+        <div className="border-t border-sepia/10 pt-3 mt-1">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={hasSimilarBook}
+              onChange={(e) => setHasSimilarBook(e.target.checked)}
+              className="w-4 h-4 accent-golden"
+            />
+            <span className="font-ui text-sm text-charcoal">
+              Is there another book like it?
+            </span>
+          </label>
+          {hasSimilarBook && (
+            <input
+              value={similarBookTitle}
+              onChange={(e) => setSimilarBookTitle(e.target.value)}
+              placeholder="Enter similar book title (helps with visual style)"
+              className="w-full mt-2 px-3 py-2 rounded-lg border border-sepia/25 bg-white/70
+                         font-ui text-sm focus:outline-none focus:ring-2 focus:ring-golden/40"
+            />
+          )}
+        </div>
+
+        <div className="border-t border-sepia/10 pt-3 mt-1">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={mainOnly}
+              onChange={(e) => setMainOnly(e.target.checked)}
+              className="w-4 h-4 accent-golden"
+            />
+            <span className="font-ui text-sm text-charcoal">
+              Limit reference search to main character & location only
+            </span>
+          </label>
+          <p className="text-xs text-sepia/70 font-ui mt-1 ml-7">
+            Saves search API quota. Other characters/locations will use a placeholder image.
+          </p>
+        </div>
       </section>
 
       {/* Visual style */}
@@ -155,6 +231,25 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
               <span className="block font-ui text-xs text-sepia mt-1">{desc}</span>
             </button>
           ))}
+        </div>
+      </section>
+
+      {/* Scene count */}
+      <section className="space-y-3">
+        <h3 className="font-display text-lg font-semibold text-charcoal">Key Scenes to Extract</h3>
+        <div className="flex items-center gap-4">
+          <input
+            type="number"
+            min={3}
+            max={20}
+            value={sceneCount}
+            onChange={(e) => setSceneCount(Math.min(20, Math.max(3, Number(e.target.value))))}
+            className="w-24 px-3 py-2 rounded-lg border border-sepia/20 bg-white font-ui text-sm
+                       text-charcoal focus:outline-none focus:ring-2 focus:ring-golden/40"
+          />
+          <p className="text-sm font-ui text-sepia">
+            scenes (3–20) — key narrative moments to illustrate
+          </p>
         </div>
       </section>
 

@@ -159,6 +159,7 @@ As a system, I need to analyze the entire book to extract key characters, locati
 - Total cost per book: ≤$0.50 in AI tokens
 - Progress indicator shown to user during analysis
 - **Chunk metadata updated with character/location relationships**
+- **Idempotent re-analysis:** Running analysis on a previously analyzed book must first clear all prior analysis results (characters, locations, visual bible, illustrations, chunk-character/chunk-location links, dramatic scores) before creating new ones. The book record and its text chunks are preserved.
 
 **Technical Specifications:**
 - Batch size: 10-15 chunks per GPT API call
@@ -203,15 +204,15 @@ As a user, I want the system to find reference images for characters and locatio
   - **2-3 reference images** showing different angles/lighting
 - Images displayed in grid format for user selection
 - User can select 1 primary reference image per character/location
-- Search queries enriched with book title/author when appropriate
+- Search queries always include book title and author (when available) for better results
 
 **Technical Specifications:**
 - Use Bing Image Search API or SerpAPI (free tier)
-- Search query format: 
-  - **Characters (well-known books):** "{character_name} {book_title} {author}" OR "{description} person from {book_title}"
-  - **Characters (unknown books):** "{description} person portrait"
-  - **Locations (well-known):** "{location_name} {book_title}" OR "{description} from {book_title}"
-  - **Locations (unknown):** "{description} landscape/interior"
+- Search query format (character name is ALWAYS included):
+  - **Characters (well-known books):** "{character_name} {book_title} {author}" OR "{character_name} {book_title}" OR "{character_name} illustration"
+  - **Characters (unknown books):** "{character_name} {description} person portrait" OR "{character_name} {description} character illustration"
+  - **Locations (well-known):** "{location_name} {book_title}" OR "{location_name} illustration"
+  - **Locations (unknown):** "{location_name} {description} landscape scenery" OR "{location_name} {description} interior illustration"
 - **Book recognition logic:**
   - Check if book title matches known works (simple list or heuristic)
   - OR ask user during setup: "Is this a well-known published book?" (Yes/No)
@@ -221,18 +222,20 @@ As a user, I want the system to find reference images for characters and locatio
 - Deduplicate similar images
 - Return top 2-3 most diverse and relevant images
 - Store image URLs (not downloading images to save bandwidth)
+- **Search query logging:** Every query sent to SerpAPI is stored in the `search_queries` database table with entity type, entity name, query text, result count, and timestamp. Available via `GET /api/books/{book_id}/search-queries`.
+- **Main-only search mode (default ON):** AI analysis identifies the single most important character and location (`is_main` flag). When enabled, only the main character and main location are searched via SerpAPI. All other entities receive a static placeholder image. This conserves API quota (~5 queries instead of ~20-30).
 
 **Search Strategy Example:**
 ```
 For "Sherlock Holmes" in well-known book "A Study in Scarlet" by Arthur Conan Doyle:
 - Query 1: "Sherlock Holmes A Study in Scarlet"
-- Query 2: "Victorian detective portrait Sherlock Holmes"
+- Query 2: "Sherlock Holmes A Study in Scarlet Arthur Conan Doyle"
 - Query 3: "Sherlock Holmes illustration"
 → Select top 2-3 most varied results
 
 For generic character "tall detective" in unknown book:
-- Query 1: "tall male detective portrait"
-- Query 2: "detective full body professional"
+- Query 1: "John Smith tall male detective with sharp features person portrait"
+- Query 2: "John Smith tall male detective with sharp features character illustration"
 → Select top 2-3 results
 ```
 
@@ -423,6 +426,12 @@ As a user, I want to track my progress and easily navigate through the book.
 **Priority:** Must-Have
 
 **Screen Sequence:**
+
+0. **Home Screen (Library)**
+   - If the user has previously analyzed books (status `ready` or `reading`), a "Continue Reading" section is displayed with a list of those books.
+   - Clicking a book card loads it into context and navigates directly to the Reading Screen, bypassing the setup/visual-bible flow.
+   - A "Start Reading a New Book" button leads to the Upload Screen for a new book.
+
 1. **Upload Screen**
    - Google Drive link input
    - "Import Book" button
@@ -452,11 +461,20 @@ As a user, I want to track my progress and easily navigate through the book.
      - "Analyzing narrative structure..."
      - "Identifying key characters..."
      - "Mapping dramatic moments..."
-     - "Searching reference images..."
    - Estimated time: 2-5 minutes
    - Cancel option (returns to upload)
 
-4. **Visual Bible Review Screen**
+4. **Analysis Review Screen (NEW)**
+   - After AI analysis completes, user is shown the extracted characters and locations
+   - Each entity is displayed as a card with name, description, and a toggle for "main" status
+   - AI pre-selects one main character and one main location (star icon filled)
+   - User can toggle any entity to include/exclude it from reference image search
+   - Counter shows how many entities are selected for search
+   - "Search Reference Images" button saves user selections and triggers SerpAPI search
+   - Only selected (main) entities consume SerpAPI quota; others get placeholder images
+   - This step decouples AI analysis from reference image search, giving user control
+
+5. **Visual Bible Review Screen**
    - Tabs or accordion for:
      - Characters (grid view)
        - Character name, description

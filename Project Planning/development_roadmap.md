@@ -3,8 +3,37 @@
 
 **Version:** 1.0 MVP  
 **Date:** February 7, 2026  
+**Last Updated:** February 7, 2026  
 **Development Approach:** Vibe-coding with AI assistance  
 **Estimated Total Time:** 40-60 hours (10-15 development sessions)
+
+---
+
+## 📊 Current Status Overview
+
+### Completed Phases
+- ✅ **Phase 1: Backend Foundation** (100% complete)
+  - All backend services implemented: book import, chunking, AI analysis, reference search
+  - Database models and CRUD operations functional
+  - All API endpoints operational
+- ✅ **Phase 2: Frontend Core UI** (100% complete)
+  - All core UI components built: BookUpload, StyleSelector, VisualBibleReview, BookReader
+  - React Router navigation implemented
+  - BookContext for state management
+- ✅ **Bug Fixes BF-1 to BF-4** (100% complete)
+  - Idempotent re-analysis, continue reading, search optimization, analysis decoupling
+
+### In Progress
+- ⚠️ **Phase 3: Image Generation Integration** (0% - not started)
+- ⚠️ **Phase 4: Integration & Polish** (50% - routing and state management done, needs error boundaries and polish)
+- ⚠️ **BF-5: UI/UX Improvements** (33% - 2 of 6 items completed)
+
+### Not Started
+- ❌ **Phase 5: Deployment**
+- ❌ **Phase 6: Documentation**
+
+### 🔄 Strategic Pivot Planned
+**B2B Author Platform**: A strategic pivot to target self-publishing authors (instead of readers) is planned. See `b2b_author_pivot_plan_94e78ef5.plan.md` for details. This roadmap reflects the **current B2C (reader-focused) implementation**.
 
 ---
 
@@ -17,14 +46,14 @@ This roadmap provides a step-by-step implementation plan optimized for developme
 ## Development Environment Setup
 
 ### Prerequisites Checklist
-- [ ] Cursor IDE installed and configured
-- [ ] Python 3.10+ installed
-- [ ] Node.js 18+ and npm installed
-- [ ] Git installed
-- [ ] API Keys obtained:
-  - [ ] OpenAI API key (for GPT analysis)
-  - [ ] GeminiGen API key (for image generation)
-  - [ ] Bing Search API key (free tier) or SerpAPI key
+- [x] Cursor IDE installed and configured
+- [x] Python 3.10+ installed
+- [x] Node.js 18+ and npm installed
+- [x] Git installed
+- [x] API Keys obtained:
+  - [x] OpenAI API key (for GPT analysis)
+  - [x] GeminiGen API key (for image generation)
+  - [x] SerpAPI key (for reference image search)
 
 ### Project Structure
 ```
@@ -69,9 +98,9 @@ reading-reinvented/
 
 ---
 
-## Phase 1: Backend Foundation (8-12 hours)
+## Phase 1: Backend Foundation (8-12 hours) ✅ COMPLETED
 
-### 1.1 Project Initialization (1 hour)
+### 1.1 Project Initialization (1 hour) ✅
 
 **Tasks:**
 1. Create project directory structure
@@ -104,13 +133,13 @@ Include requirements.txt with FastAPI, SQLAlchemy, pydantic, python-dotenv"
 - `frontend/tailwind.config.js`
 
 **Validation:**
-- [ ] Backend runs with `uvicorn app.main:app --reload`
-- [ ] Frontend runs with `npm run dev`
-- [ ] Health check endpoint returns 200
+- [x] Backend runs with `uvicorn app.main:app --reload`
+- [x] Frontend runs with `npm run dev`
+- [x] Health check endpoint returns 200
 
 ---
 
-### 1.2 Database Models & Schema (2 hours)
+### 1.2 Database Models & Schema (2 hours) ✅
 
 **Tasks:**
 1. Define SQLAlchemy models matching requirements doc
@@ -140,13 +169,13 @@ Put this in database.py"
 - `backend/app/crud.py` (Helper functions for database operations)
 
 **Validation:**
-- [ ] Database file created in `backend/app.db`
-- [ ] All tables exist with correct schema
-- [ ] Can insert and query test data
+- [x] Database file created in `backend/app.db`
+- [x] All tables exist with correct schema
+- [x] Can insert and query test data
 
 ---
 
-### 1.3 Google Drive Import Service (2 hours)
+### 1.3 Google Drive Import Service (2 hours) ✅
 
 **Tasks:**
 1. Implement Google Drive link parser
@@ -175,13 +204,14 @@ Handle errors: invalid link, file not found, network issues"
 - API endpoint in `backend/app/main.py`
 
 **Validation:**
-- [ ] Successfully downloads text file from Google Drive
-- [ ] Book saved to database with correct metadata
-- [ ] Error handling works for invalid links
+- [x] Successfully downloads text file from Google Drive
+- [x] Book saved to database with correct metadata
+- [x] Error handling works for invalid links
+- [x] Added file format validation (BF-5.3) - rejects non-.txt files with user-friendly error
 
 ---
 
-### 1.4 Text Chunking Service (2 hours)
+### 1.4 Text Chunking Service (2 hours) ✅
 
 **Tasks:**
 1. Implement intelligent chunking algorithm
@@ -210,14 +240,14 @@ Use tiktoken library for token counting (GPT-3.5-turbo encoding)"
 - Update `backend/app/services/book_service.py` with chunking logic
 
 **Validation:**
-- [ ] 500-page book produces ~50-60 chunks
-- [ ] Overlaps are correct
-- [ ] Chunks stored in database with correct metadata
-- [ ] Page number calculations accurate
+- [x] 500-page book produces ~50-60 chunks
+- [x] Overlaps are correct
+- [x] Chunks stored in database with correct metadata
+- [x] Page number calculations accurate
 
 ---
 
-### 1.5 OpenAI Analysis Service (3 hours)
+### 1.5 OpenAI Analysis Service (3 hours) ✅
 
 **Tasks:**
 1. Implement batch analysis with GPT API
@@ -318,15 +348,17 @@ Return ONLY valid JSON in this format:
 ```
 
 **Validation:**
-- [ ] Analysis completes within 5 minutes for 500-page book
-- [ ] Cost < $0.50 per book (log actual cost)
-- [ ] Extracts 5 characters and 5 locations
-- [ ] Dramatic moments identified per chunk
-- [ ] Results saved to database correctly
+- [x] Analysis completes within 5 minutes for 500-page book
+- [x] Cost < $0.50 per book (log actual cost)
+- [x] Extracts 5 characters and 5 locations
+- [x] Dramatic moments identified per chunk
+- [x] Results saved to database correctly
+- [x] Upgraded to gpt-4o-mini (128K context) to handle large books
+- [x] AI marks main character and main location with is_main flag
 
 ---
 
-### 1.6 Reference Image Search Service (2 hours)
+### 1.6 Reference Image Search Service (2 hours) ✅
 
 **Tasks:**
 1. Integrate Bing Image Search API (or SerpAPI)
@@ -376,18 +408,20 @@ Return image URLs with metadata (width, height, source)"
 - Store API key in `.env`
 
 **Validation:**
-- [ ] Returns 2-3 reference images per character
-- [ ] Returns 2-3 reference images per location
-- [ ] Uses book title/author when marked as well-known
-- [ ] Images are appropriate and diverse
-- [ ] Handles API failures gracefully
-- [ ] Results cached to avoid redundant calls
+- [x] Returns 2-3 reference images per character
+- [x] Returns 2-3 reference images per location
+- [x] Uses book title/author (always included in queries, not just for well-known books)
+- [x] Images are appropriate and diverse
+- [x] Handles API failures gracefully
+- [x] Search queries logged to search_queries table for review
+- [x] Main-only search mode reduces API calls from ~20 to ~5
+- [x] Placeholder images for non-main entities
 
 ---
 
-## Phase 2: Frontend Core UI (8-10 hours)
+## Phase 2: Frontend Core UI (8-10 hours) ✅ COMPLETED
 
-### 2.1 Book Upload Component (2 hours)
+### 2.1 Book Upload Component (2 hours) ✅
 
 **Tasks:**
 1. Create Google Drive link input form
@@ -416,14 +450,15 @@ Return image URLs with metadata (width, height, source)"
 - `frontend/src/services/api.js` (API client for backend)
 
 **Validation:**
-- [ ] Form validates Google Drive URLs
-- [ ] Shows loading state during import
-- [ ] Displays book metadata on success
-- [ ] Handles errors gracefully
+- [x] Form validates Google Drive URLs
+- [x] Shows loading state during import
+- [x] Displays book metadata on success
+- [x] Handles errors gracefully
+- [x] Displays detailed backend error messages to user
 
 ---
 
-### 2.2 Style Selector Component (2 hours)
+### 2.2 Style Selector Component (2 hours) ✅
 
 **Tasks:**
 1. Visual style picker UI
@@ -474,15 +509,17 @@ Use Tailwind CSS. Make it visually appealing and intuitive."
 - `frontend/src/components/StyleSelector.jsx`
 
 **Validation:**
-- [ ] All style options selectable
-- [ ] Slider works smoothly
-- [ ] Total illustrations calculated correctly
-- [ ] Layout previews are clear
-- [ ] Settings passed to backend API
+- [x] All style options selectable
+- [x] Slider works smoothly
+- [x] Total illustrations calculated correctly
+- [x] Layout previews are clear
+- [x] Settings passed to backend API
+- [x] Book recognition question implemented
+- [x] Main-only reference search toggle (default ON)
 
 ---
 
-### 2.3 Loading/Wait Screens (1 hour)
+### 2.3 Loading/Wait Screens (1 hour) ⚠️ PARTIAL
 
 **Tasks:**
 1. Analysis progress screen
@@ -517,14 +554,14 @@ Use smooth transitions between messages"
 - `frontend/src/components/LoadingScreen.jsx`
 
 **Validation:**
-- [ ] Smooth animations
-- [ ] Progress updates in real-time
-- [ ] Cancel functionality works
-- [ ] Estimated time is accurate
+- [x] Smooth animations
+- [ ] Progress updates in real-time (needs WebSocket or polling)
+- [ ] Cancel functionality works (not implemented yet)
+- [ ] Estimated time is accurate (not implemented yet)
 
 ---
 
-### 2.4 Visual Bible Review Component (3 hours)
+### 2.4 Visual Bible Review Component (3 hours) ✅
 
 **Tasks:**
 1. Display characters with reference images
@@ -578,15 +615,16 @@ Add hover effects and smooth transitions"
 - `frontend/src/components/CharacterCard.jsx`
 
 **Validation:**
-- [ ] All reference images display correctly
-- [ ] Selection mechanism works smoothly
-- [ ] Description editing functional (if included)
-- [ ] Approval button enables only when ready
-- [ ] Data sent to backend correctly
+- [x] All reference images display correctly
+- [x] Selection mechanism works smoothly
+- [ ] Description editing functional (deferred)
+- [x] Approval button enables only when ready
+- [x] Data sent to backend correctly
+- [x] Added Analysis Review Page (BF-4) - decoupled from reference search
 
 ---
 
-### 2.5 Book Reader Component (4 hours)
+### 2.5 Book Reader Component (4 hours) ✅
 
 **Tasks:**
 1. Two-page spread layout
@@ -651,16 +689,18 @@ Make it feel like reading a real book"
 - `frontend/src/components/PageControls.jsx`
 
 **Validation:**
-- [ ] Two-page layout displays correctly
-- [ ] Page turning is smooth
-- [ ] Illustrations render inline or as panels
-- [ ] Keyboard navigation works
-- [ ] Progress saving functional
-- [ ] Reading speed tracking accurate
+- [x] Two-page layout displays correctly
+- [x] Page turning is smooth
+- [x] Illustrations render inline or as panels
+- [x] Keyboard navigation works
+- [x] Progress saving functional
+- [ ] Reading speed tracking accurate (not implemented yet)
+- [x] Can load book by URL parameter (BF-2)
+- [x] Home screen "Continue Reading" section (BF-2)
 
 ---
 
-## Phase 3: Image Generation Integration (6-8 hours)
+## Phase 3: Image Generation Integration (6-8 hours) ❌ NOT STARTED
 
 ### 3.1 GeminiGen API Service (3 hours)
 
@@ -903,7 +943,117 @@ READING SPEED TRACKING:
 
 ---
 
-## Phase 4: Integration & Polish (4-6 hours)
+## Bug Fixes & Improvements (applied during development)
+
+### BF-1: Idempotent Re-Analysis ✅ COMPLETED
+
+**Problem:** Running `POST /api/books/{book_id}/analyze` on an already-analyzed book duplicated characters, locations and other analysis artefacts in the database.
+
+**Solution:**
+- Added `clear_analysis_results(db, book_id)` function to `backend/app/crud.py`.
+- The function deletes: `chunk_characters`, `chunk_locations`, `characters`, `locations`, `visual_bible`, `illustrations`, and resets `dramatic_score` to `NULL` on all chunks. The book record and its text chunks are preserved.
+- `analyze_book` endpoint in `backend/app/routers/books.py` now calls `clear_analysis_results` before starting a new analysis.
+
+### BF-2: Continue Reading from Home Screen ✅ COMPLETED
+
+**Problem:** There was no way to resume reading a previously analyzed book. The only path to the reading experience led through the full Visual Bible generation flow.
+
+**Solution:**
+- `HomePage.tsx` now fetches the list of books on mount and displays a "Continue Reading" section for books with status `ready` or `reading`.
+- Clicking a book card sets it in `BookContext` and navigates to `/read`.
+- `ReadingPage.tsx` supports loading a book by `bookId` URL parameter (for direct links / page refresh).
+- `App.tsx` adds route `/read/:bookId` alongside `/read`.
+- `api.ts` exports a new `listBooks()` function.
+
+### BF-3: Reference Image Search Optimization ✅ COMPLETED
+
+**Problem:** Character names were not included in search queries for non-well-known books. Search queries were not logged. Every SerpAPI run searched for all 5 characters and 5 locations (~20-30 API calls), quickly exhausting the free tier.
+
+**Solution:**
+
+1. **Character names always in queries.** `_build_character_queries` and `_build_location_queries` in `search_service.py` now always include the entity name, even for non-well-known books.
+
+2. **Search query audit log.** New `SearchQuery` model (`search_queries` table) stores every SerpAPI query with: book_id, entity_type, entity_name, query_text, results_count, created_at. New endpoint `GET /api/books/{book_id}/search-queries` to review them. Queries are cleared on re-analysis via `clear_analysis_results`.
+
+3. **AI flags main character & location.** `CONSOLIDATION_PROMPT` in `ai_service.py` now asks GPT to mark exactly one character and one location as `is_main: true`. New `is_main` column on `Character` and `Location` models (with SQLite ALTER TABLE migration).
+
+4. **Main-only search mode.** New "Limit reference search to main character & location only" checkbox in `StyleSelector` (default ON). `POST /api/books/{book_id}/search-references` accepts `{ "main_only": true }` body. When enabled, only `is_main=1` entities are searched via SerpAPI; the rest get a static placeholder SVG (`/static/placeholder_reference.svg`). Reduces API calls from ~20-30 to ~5.
+
+5. **Placeholder image.** Static SVG at `backend/static/placeholder_reference.svg` served via FastAPI StaticFiles.
+
+**Files changed:** `models.py`, `database.py`, `crud.py`, `schemas.py`, `ai_service.py`, `search_service.py`, `routers/books.py`, `routers/visual_bible.py`, `BookContext.tsx`, `StyleSelector.tsx`, `api.ts`, `SetupPage.tsx`.
+
+---
+
+### Delete Book from Library ✅ COMPLETED
+
+**Feature:** Added ability to delete book and all associated data from the library.
+
+**Solution:**
+- `DELETE /api/books/{book_id}` endpoint in `routers/books.py`
+- `delete_book()` function in `crud.py` removes:
+  - All database records: characters, locations, visual_bible, illustrations, reading_progress, search_queries, chunk relationships, chunks
+  - Generated illustration files from disk (using `os.remove`)
+  - **Preserves:** Original text file on disk (`book.file_path`) and Google Drive link
+- Frontend: Delete button with styled confirmation dialog (from BF-5.2)
+
+**Files changed:** `crud.py`, `routers/books.py`, `api.ts`, `HomePage.tsx`
+
+### BF-4: Decouple Analysis from Reference Search + Improve Queries ✅ COMPLETED
+
+**Problem:** AI analysis and reference image search were tightly coupled — `SetupPage.handleAnalyze()` called `analyzeBook()` then immediately `searchReferences()`. Users could not review AI-identified characters/locations or change the "main" selection before search consumed SerpAPI quota. Search queries for non-well-known books did not include book title or author, producing generic results.
+
+**Solution:**
+
+1. **New Analysis Review Page.** After AI analysis completes, `SetupPage` navigates to `/analysis-review` instead of calling `searchReferences()`. New `AnalysisReviewPage.tsx` fetches characters and locations, displays them as interactive cards with star-toggle for `is_main` flag. User can select/deselect any entities for reference search. Also fixed "Start Reading a New Book" button to call `ctx.reset()` before navigating to `/setup` (prevents stale state from previous book).
+
+2. **Batch entity selection endpoint.** New `PUT /api/books/{book_id}/entity-selections` accepts `{ characters: [{id, is_main}], locations: [{id, is_main}] }` to persist user's choices before triggering search. New `EntityMainFlag` and `EntitySelectionsRequest` schemas.
+
+3. **Search queries always include book context.** `_build_character_queries()` and `_build_location_queries()` no longer branch on `is_well_known`. Query 1 always includes `{name} {book_title} {author} illustration`. Query 2 is a description-based fallback. The `is_well_known` parameter was removed from search service functions.
+
+4. **Author passed to location queries.** `search_location_references()` and `search_all_references()` now accept and pass `author` to `_build_location_queries()`.
+
+5. **Bug fix.** Removed stale debug instrumentation from `crud.py`, `books.py`, and `HomePage.tsx`. Fixed silent catch in `handleDelete` to show alert on failure.
+
+**Files changed:** `schemas.py`, `routers/books.py`, `routers/visual_bible.py`, `services/search_service.py`, `crud.py`, `SetupPage.tsx`, `AnalysisReviewPage.tsx` (new), `App.tsx`, `api.ts`, `HomePage.tsx`, `requirements_document.md`.
+
+---
+
+### BF-5: UI/UX Improvements ⚠️ PARTIAL (2/6 completed)
+
+#### BF-5.1: Некорректный рендеринг текста на Reading Page ❌ PENDING
+**Problem:** Text displayed incorrectly (line breaks ignored, encoding issues with special characters like © and apostrophes) on the reading page.
+**Status:** Not implemented yet
+**Affected:** `ReadingPage.tsx`, `book_service.py`
+
+#### BF-5.2: Стилизованный диалог подтверждения удаления ✅ COMPLETED
+**Problem:** Basic `window.confirm()` dialog for book deletion doesn't match application design.
+**Solution:** Replaced with custom styled `Dialog` component from `@headlessui/react` in `HomePage.tsx`.
+**Files changed:** `HomePage.tsx`
+
+#### BF-5.3: Сообщение об ошибке при некорректном формате файла ✅ COMPLETED
+**Problem:** No user-friendly error when importing non-.txt files from Google Drive.
+**Solution:** Added Content-Type validation in `book_service.py`; displays specific error message in `BookUpload.tsx`.
+**Files changed:** `book_service.py`, `BookUpload.tsx`
+
+#### BF-5.4: Lightbox для референсных изображений ❌ PENDING
+**Problem:** Reference image thumbnails too small on Visual Bible page, no full-size view option.
+**Status:** Not implemented yet
+**Affected:** `VisualBiblePage.tsx`
+
+#### BF-5.5: Проверка дубликатов при импорте книг ❌ PENDING
+**Problem:** Importing the same Google Drive link creates duplicate book entries without warning.
+**Status:** Not implemented yet
+**Affected:** `routers/books.py`, `crud.py`
+
+#### BF-5.6: Кнопка повторного анализа книги ❌ PENDING
+**Problem:** No option to re-run AI analysis and generation for already analyzed books.
+**Status:** Not implemented yet
+**Affected:** `HomePage.tsx`, backend re-analysis flow
+
+---
+
+## Phase 4: Integration & Polish (4-6 hours) ⚠️ PARTIAL
 
 ### 4.1 End-to-End Workflow Integration (2 hours)
 
@@ -962,11 +1112,12 @@ Include route guards:
 - `frontend/src/pages/ReadingPage.jsx`
 
 **Validation:**
-- [ ] Can navigate through entire workflow
-- [ ] State persists across pages
-- [ ] Route guards work correctly
-- [ ] Error boundaries catch errors
-- [ ] No broken UI states
+- [x] Can navigate through entire workflow
+- [x] State persists across pages
+- [x] Route guards work correctly
+- [ ] Error boundaries catch errors (not implemented yet)
+- [x] No broken UI states
+- [x] BookContext implemented with reset functionality
 
 ---
 
@@ -1093,7 +1244,7 @@ Use Tailwind CSS utilities and custom CSS where needed"
 
 ---
 
-## Phase 5: Deployment (2-3 hours)
+## Phase 5: Deployment (2-3 hours) ❌ NOT STARTED
 
 ### 5.1 Backend Deployment
 
@@ -1261,7 +1412,7 @@ services:
 
 ---
 
-## Phase 6: Documentation & Handoff (1-2 hours)
+## Phase 6: Documentation & Handoff (1-2 hours) ⚠️ PARTIAL
 
 ### 6.1 User Documentation
 

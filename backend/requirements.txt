@@ -10,3 +10,6 @@ httpx
 aiohttp
 Pillow
 python-multipart
+python-docx
+PyPDF2
+langdetect

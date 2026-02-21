@@ -1,0 +1,2 @@
+"; DROP TABLE images; -- futuristic city
+More normal text here.

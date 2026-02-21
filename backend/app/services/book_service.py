@@ -60,7 +60,22 @@ async def download_text_from_google_drive(google_drive_link: str) -> str:
                 f"(HTTP {response.status_code})"
             )
 
-        content_type = response.headers.get("content-type", "")
+        content_type = response.headers.get("content-type", "").lower()
+        # Reject known non-text file types
+        non_text_types = (
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats",
+            "application/vnd.ms-",
+            "image/",
+            "application/zip",
+            "application/x-rar",
+        )
+        if any(nt in content_type for nt in non_text_types):
+            raise RuntimeError(
+                "The linked file does not appear to be a .txt file. "
+                "Please ensure the file format is correct."
+            )
         # Google may serve HTML for files that require auth
         if "text/html" in content_type and len(response.text) < 5000:
             if "ServiceLogin" in response.text or "accounts.google.com" in response.text:

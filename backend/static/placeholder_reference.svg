@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="12" fill="#E8E4DE"/>
+  <rect x="180" y="160" width="152" height="152" rx="8" fill="none" stroke="#B0A89E" stroke-width="3" stroke-dasharray="8 4"/>
+  <line x1="180" y1="160" x2="332" y2="312" stroke="#B0A89E" stroke-width="2"/>
+  <line x1="332" y1="160" x2="180" y2="312" stroke="#B0A89E" stroke-width="2"/>
+  <text x="256" y="370" text-anchor="middle" font-family="system-ui, sans-serif" font-size="18" fill="#8B7355">No reference image</text>
+  <text x="256" y="396" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#B0A89E">Search was skipped</text>
+</svg>
