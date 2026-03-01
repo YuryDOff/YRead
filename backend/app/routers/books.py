@@ -13,6 +13,8 @@ from app.database import SessionLocal, get_db
 from app.schemas import (
     BookImportRequest,
     BookUpdateRequest,
+    BookCreate,
+    BookRead,
     BookResponse,
     BookAnalyzeRequest,
     AnalyzeStatusResponse,
@@ -35,7 +37,7 @@ from app.services.book_service import (
     chunk_text,
 )
 from app.services.upload_service import process_manuscript_upload, UploadError
-from app.services.ai_service import MAX_MAIN_CHARACTERS, MAX_MAIN_LOCATIONS, run_full_analysis
+from app.services.ai_service import MAX_MAIN_CHARACTERS, MAX_MAIN_LOCATIONS, run_full_analysis, get_entity_types_for_mode
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,18 @@ def _set_overall_status(book_id: int, status: str) -> None:
             _analysis_progress[book_id]["overall_status"] = status
 
 
+
+
+@router.post("/books", response_model=BookRead, status_code=201)
+def create_book(body: BookCreate, db: Session = Depends(get_db)):
+    """Create a book record (minimal payload) for tests and lightweight workflows."""
+    book = crud.create_book(
+        db,
+        title=body.title,
+        author=body.author,
+        analysis_mode=body.analysis_mode,
+    )
+    return book
 # ---------------------------------------------------------------------------
 # Book upload (B2B: direct file upload)
 # ---------------------------------------------------------------------------
@@ -295,6 +309,11 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
         if not book:
             logger.error("[analyze] background: book %s not found", book_id)
             return
+        analysis_mode = getattr(book, "analysis_mode", "pro") or "pro"
+        mapped = get_entity_types_for_mode(analysis_mode, entity_types)
+        if mapped == ["character"]:
+            entity_types = ["characters"]
+
         # Persist display/audience from request (extraction uses total_words, not scene_count)
         if "scene_display_count" in req_dict:
             crud.update_book(db, book_id, scene_display_count=req_dict["scene_display_count"])

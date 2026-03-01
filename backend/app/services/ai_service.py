@@ -55,6 +55,13 @@ def _get_client() -> OpenAI:
 # Model to use – gpt-4o-mini: 128K context, cheaper than gpt-3.5-turbo
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+
+def get_entity_types_for_mode(analysis_mode: str, requested_types: list[str]) -> list[str]:
+    """Simple mode extracts characters only; pro mode keeps requested types."""
+    if analysis_mode == "simple":
+        return ["character"]
+    return requested_types
+
 # ---------------------------------------------------------------------------
 # Scoring & Analysis Functions
 # ---------------------------------------------------------------------------

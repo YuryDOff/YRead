@@ -8,6 +8,9 @@ const WORKFLOW_STAGES: { segment: string; label: string }[] = [
   { segment: 'review-search', label: 'Search Queries' },
   { segment: 'review-search-result', label: 'Search Results' },
   { segment: 'visual-bible', label: 'Visual Bible' },
+  { segment: 'mood-board', label: 'Mood Board' },
+  { segment: 'cover-studio', label: 'Cover Studio' },
+  { segment: 'text-studio', label: 'Text Studio' },
   { segment: 'preview', label: 'Preview' },
 ];
 

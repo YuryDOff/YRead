@@ -9,6 +9,9 @@ import ReviewSearchResultPage from './pages/ReviewSearchResultPage';
 import VisualBiblePage from './pages/VisualBiblePage';
 import PreviewPage from './pages/ReadingPage';
 import SettingsPage from './pages/SettingsPage';
+import MoodBoardPage from './pages/MoodBoardPage';
+import CoverStudioPage from './pages/CoverStudioPage';
+import TextStudioPage from './pages/TextStudioPage';
 
 export default function App() {
   return (
@@ -29,6 +32,9 @@ export default function App() {
             <Route path="review-search" element={<ReviewSearchPage />} />
             <Route path="review-search-result" element={<ReviewSearchResultPage />} />
             <Route path="visual-bible" element={<VisualBiblePage />} />
+            <Route path="mood-board" element={<MoodBoardPage />} />
+            <Route path="cover-studio" element={<CoverStudioPage />} />
+            <Route path="text-studio" element={<TextStudioPage />} />
             <Route path="preview" element={<PreviewPage />} />
           </Route>
         </Routes>

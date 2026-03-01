@@ -19,6 +19,37 @@ class BookUpdateRequest(BaseModel):
     search_query_strategy: Optional[str] = None
 
 
+class BookCreate(BaseModel):
+    title: str
+    author: Optional[str] = None
+    analysis_mode: Literal["simple", "pro"] = "pro"
+
+
+class BookRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    author: Optional[str] = None
+    analysis_mode: Literal["simple", "pro"] = "pro"
+
+
+class I2TAnalysisResult(BaseModel):
+    style_template: str
+    composition_notes: str
+    color_palette_extracted: dict
+    style_tags: list[str]
+    mood_keywords: list[str]
+    lighting_description: str
+
+
+class PromptEngineeringResult(BaseModel):
+    final_prompt: str
+    negative_prompt: str
+    compatibility_status: Literal["COMPATIBLE", "WARNING", "INCOMPATIBLE"]
+    compatibility_note: str
+
+
 class BookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,6 +66,7 @@ class BookResponse(BaseModel):
     entity_activations: Optional[list[str]] = None
     genre: Optional[str] = None
     workflow_type: Optional[str] = None
+    analysis_mode: Literal["simple", "pro"] = "pro"
     scene_display_count: int = 10
     target_audience: str = "adult"
     search_query_strategy: str = "tokens"
@@ -98,6 +130,9 @@ class CharacterResponse(BaseModel):
     ontology: Optional[dict] = None
     entity_visual_tokens: Optional[dict] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -131,6 +166,9 @@ class CharacterUpdate(BaseModel):
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +192,9 @@ class LocationResponse(BaseModel):
     ontology: Optional[dict] = None
     entity_visual_tokens: Optional[dict] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -184,6 +225,9 @@ class LocationUpdate(BaseModel):
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +478,9 @@ class ArtefactUpdate(BaseModel):
     is_main: Optional[int] = None
     visual_type: Optional[str] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
 
 class ArtefactResponse(BaseModel):
@@ -457,6 +504,9 @@ class ArtefactResponse(BaseModel):
     visual_bible_images: Optional[list[str]] = None
     visual_bible_depth: Optional[int] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -477,6 +527,11 @@ class ArtefactResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Cover Analysis
 # ---------------------------------------------------------------------------
+
+class CoverAnalysisReferenceRequest(BaseModel):
+    image_url: str
+    mode: Literal["cover", "illustration"] = "cover"
+
 
 class CoverAnalysisResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -503,6 +558,9 @@ class CoverAnalysisResponse(BaseModel):
     primary_cover_location_id: Optional[int] = None
     primary_cover_artefact_id: Optional[int] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -553,6 +611,9 @@ class CoverAnalysisUpdateRequest(BaseModel):
     primary_cover_location_id: Optional[int] = None
     primary_cover_artefact_id: Optional[int] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

@@ -1267,3 +1267,14 @@ List of dicts; each: url, thumbnail?, width?, height?, credit?, license?, provid
 **PUT /api/books/{book_id}/entity-activations** body: EntityActivationsRequest (entity_activations: list[str]). Updates book.entity_activations JSON.
 
 End of codebase snapshot. Use this document for implementation planning and test specification without ambiguity.
+
+---
+
+## Incremental Update (Phases 8–15 partial implementation)
+
+- Added `Book.analysis_mode` (`simple|pro`) and extended `CoverAnalysis` with `reference_style_template`, `reference_style_notes`, `reference_image_url`.
+- Added `POST /api/books` (minimal create) and `POST /api/books/{book_id}/analyze-cover-reference`.
+- Added services: `i2t_analysis_service.py`, `prompt_engineering_service.py`.
+- Replaced FLUX provider with fal.ai-backed call and added `dalle_provider.py`.
+- Added `serper_provider.py` and provider registry entry.
+- Added frontend routes/pages for `mood-board`, `cover-studio`, `text-studio`, plus `FeatureGate` and `CoverBriefEditor` components.
