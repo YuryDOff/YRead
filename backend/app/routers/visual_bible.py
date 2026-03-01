@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -20,8 +20,15 @@ from app.schemas import (
     StatusResponse,
     EngineRatingUpdate,
     EngineRatingResponse,
+    CoverAnalysisResponse,
+    CoverAnalysisUpdateRequest,
+    VisualBibleEntryResponse,
+    VisualBibleEntryGenerateRequest,
+    VisualBibleEntryGenerateAllRequest,
+    VisualBibleEntryPatchRequest,
 )
 from app import crud
+from app.models import VisualBibleEntry
 from app.services.search_service import (
     search_references_for_book,
     get_proposed_search_queries,
@@ -165,7 +172,9 @@ async def search_references(
     characters = crud.get_characters_by_book(db, book_id)
     locations = crud.get_locations_by_book(db, book_id)
 
-    if not characters and not locations:
+    search_entity_types = req.search_entity_types or "both"
+    needs_chars_locs = search_entity_types in ("both", "characters", "locations", "all")
+    if needs_chars_locs and not characters and not locations:
         raise HTTPException(
             status_code=400,
             detail="No characters or locations found. Analyze the book first.",
@@ -176,7 +185,11 @@ async def search_references(
             return None
         return {int(k): v for k, v in d.items()}
 
-    search_entity_types = req.search_entity_types or "both"
+    def _int_key_cover_queries(q: Optional[list]) -> Optional[list[str]]:
+        if not q:
+            return None
+        return [str(x).strip() for x in q if str(x).strip()]
+
     result = await search_references_for_book(
         book_id=book_id,
         search_all=not main_only,
@@ -188,16 +201,17 @@ async def search_references(
         preferred_provider=req.preferred_provider,
         search_entity_types=search_entity_types,
         enabled_providers=req.enabled_providers,
+        artefact_queries=_int_key(req.artefact_queries) if req.artefact_queries else None,
+        cover_queries=_int_key_cover_queries(req.cover_queries),
     )
 
     # Convert to format expected by VisualBibleReview: characters: {name: images[]}
+    # Preserve actual provider as source (unsplash, serpapi, pexels, pixabay, openverse, wikimedia, deviantart, user)
     chars_by_name: dict[str, list] = {}
     for item in result.get("characters", []):
         images = item.get("images", [])
         for img in images:
             img.setdefault("source", img.get("provider") or "unsplash")
-            if img.get("source") not in ("unsplash", "serpapi"):
-                img["source"] = "unsplash"
         chars_by_name[item["name"]] = images
 
     locs_by_name: dict[str, list] = {}
@@ -205,8 +219,6 @@ async def search_references(
         images = item.get("images", [])
         for img in images:
             img.setdefault("source", img.get("provider") or "serpapi")
-            if img.get("source") not in ("unsplash", "serpapi"):
-                img["source"] = "serpapi"
         locs_by_name[item["name"]] = images
 
     # Persist search results to reference_images (append, FIFO cap 50 per entity)
@@ -222,8 +234,6 @@ async def search_references(
             if crud.get_reference_image_by_entity_url(db, "character", char.id, url):
                 continue
             src = img.get("source") or img.get("provider") or "unsplash"
-            if src not in ("unsplash", "serpapi"):
-                src = "unsplash"
             crud.create_reference_image(
                 db,
                 book_id=book_id,
@@ -250,8 +260,6 @@ async def search_references(
             if crud.get_reference_image_by_entity_url(db, "location", loc.id, url):
                 continue
             src = img.get("source") or img.get("provider") or "serpapi"
-            if src not in ("unsplash", "serpapi"):
-                src = "serpapi"
             crud.create_reference_image(
                 db,
                 book_id=book_id,
@@ -266,9 +274,72 @@ async def search_references(
         exclude = set(crud.get_selected_reference_urls(db, "location", loc.id))
         crud.trim_reference_images_fifo(db, "location", loc.id, exclude_urls=exclude)
 
+    artefacts = crud.get_artefacts_by_book(db, book_id)
+    artefacts_by_name = {a.name: a for a in artefacts}
+    artefacts_out: dict[str, list] = {}
+    for item in result.get("artefacts", []):
+        images = item.get("images", [])
+        for img in images:
+            img.setdefault("source", img.get("provider") or "unsplash")
+        artefacts_out[item["name"]] = images
+        artefact = artefacts_by_name.get(item["name"])
+        if artefact:
+            for img in images:
+                url = img.get("url")
+                if not url:
+                    continue
+                if crud.get_reference_image_by_entity_url(db, "artefact", artefact.id, url):
+                    continue
+                src = img.get("source") or img.get("provider") or "unsplash"
+                crud.create_reference_image(
+                    db,
+                    book_id=book_id,
+                    entity_type="artefact",
+                    entity_id=artefact.id,
+                    url=url,
+                    thumbnail=img.get("thumbnail"),
+                    width=img.get("width"),
+                    height=img.get("height"),
+                    source=src,
+                )
+            exclude = set(crud.get_selected_reference_urls(db, "artefact", artefact.id))
+            crud.trim_reference_images_fifo(db, "artefact", artefact.id, exclude_urls=exclude)
+
+    cover_out: dict[str, list] = {}
+    cover_result = result.get("cover")
+    if cover_result:
+        images = cover_result.get("images", [])
+        for img in images:
+            img.setdefault("source", img.get("provider") or "unsplash")
+        cover_out["cover"] = images
+        cover_analysis = crud.get_cover_analysis(db, book_id)
+        if cover_analysis:
+            for img in images:
+                url = img.get("url")
+                if not url:
+                    continue
+                if crud.get_reference_image_by_entity_url(db, "cover", cover_analysis.id, url):
+                    continue
+                src = img.get("source") or img.get("provider") or "unsplash"
+                crud.create_reference_image(
+                    db,
+                    book_id=book_id,
+                    entity_type="cover",
+                    entity_id=cover_analysis.id,
+                    url=url,
+                    thumbnail=img.get("thumbnail"),
+                    width=img.get("width"),
+                    height=img.get("height"),
+                    source=src,
+                )
+            exclude = set(crud.get_selected_reference_urls(db, "cover", cover_analysis.id))
+            crud.trim_reference_images_fifo(db, "cover", cover_analysis.id, exclude_urls=exclude)
+
     response = {
         "characters": chars_by_name,
         "locations": locs_by_name,
+        "artefacts": artefacts_out,
+        "cover": cover_out,
         "queries_run": result.get("queries_run", 0),
         "provider_usage": result.get("provider_usage", {}),
     }
@@ -330,7 +401,39 @@ def get_reference_results(book_id: int, db: Session = Depends(get_db)):
             for r in rows
         ]
 
-    return {"characters": chars_out, "locations": locs_out}
+    artefacts = crud.get_artefacts_by_book(db, book_id)
+    artefacts_out: dict[str, list] = {}
+    for a in artefacts:
+        rows = crud.get_reference_images_for_entity(db, "artefact", a.id)
+        artefacts_out[a.name] = [
+            {
+                "url": r.url,
+                "thumbnail": r.thumbnail or r.url,
+                "width": r.width,
+                "height": r.height,
+                "source": r.source,
+            }
+            for r in rows
+        ]
+
+    cover_out: dict[str, list] = {}
+    cover_analysis = crud.get_cover_analysis(db, book_id)
+    cover_rows: list = []
+    if cover_analysis:
+        cover_rows = crud.get_reference_images_for_entity(db, "cover", cover_analysis.id)
+        cover_out["cover"] = [
+            {
+                "url": r.url,
+                "thumbnail": r.thumbnail or r.url,
+                "width": r.width,
+                "height": r.height,
+                "source": r.source,
+            }
+            for r in cover_rows
+        ]
+
+    # Return cover first so it is not dropped if response is truncated (e.g. large payload)
+    return {"cover": cover_out, "characters": chars_out, "locations": locs_out, "artefacts": artefacts_out}
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +484,19 @@ def approve_visual_bible(
             selected_reference_urls=json.dumps(url_list) if url_list else None,
         )
 
+    for artefact_id_str, urls in req.artefact_selections.items():
+        aid = int(artefact_id_str)
+        url_list = urls if isinstance(urls, list) else ([urls] if urls else [])
+        first_url = url_list[0] if url_list else None
+        crud.update_artefact(
+            db,
+            aid,
+            reference_image_url=first_url,
+            selected_reference_urls=json.dumps(url_list) if url_list else None,
+        )
+
+    # cover_selections accepted; no DB column for cover selected URLs yet
+
     all_char_ids = {c.id for c in crud.get_characters_by_book(db, book_id)}
     all_loc_ids = {loc.id for loc in crud.get_locations_by_book(db, book_id)}
     for cid in all_char_ids:
@@ -425,15 +541,23 @@ def reference_upload(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    if entity_type not in ("character", "location"):
-        raise HTTPException(status_code=400, detail="entity_type must be character or location")
+    if entity_type not in ("character", "location", "artefact", "cover"):
+        raise HTTPException(status_code=400, detail="entity_type must be character, location, artefact, or cover")
 
     if entity_type == "character":
         ent = crud.get_characters_by_book(db, book_id)
         ent = next((c for c in ent if c.id == entity_id), None)
-    else:
+    elif entity_type == "location":
         ent = crud.get_locations_by_book(db, book_id)
         ent = next((l for l in ent if l.id == entity_id), None)
+    elif entity_type == "artefact":
+        ent = crud.get_artefact(db, entity_id)
+        if ent and ent.book_id != book_id:
+            ent = None
+    else:
+        # cover: entity_id must be the book's cover_analysis id
+        cover_analysis = crud.get_cover_analysis(db, book_id)
+        ent = cover_analysis if (cover_analysis and cover_analysis.id == entity_id) else None
     if not ent:
         raise HTTPException(status_code=404, detail="Entity not found for this book")
 
@@ -484,6 +608,38 @@ def reference_upload(
 # Engine ratings
 # ---------------------------------------------------------------------------
 
+@router.get("/books/{book_id}/cover-analysis", response_model=CoverAnalysisResponse)
+def get_cover_analysis(book_id: int, db: Session = Depends(get_db)):
+    """Get cover analysis for a book. 404 if not yet run."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    cover = crud.get_cover_analysis(db, book_id)
+    if not cover:
+        raise HTTPException(status_code=404, detail="Cover analysis not found. Run analysis first.")
+    return cover
+
+
+@router.patch("/books/{book_id}/cover-analysis", response_model=CoverAnalysisResponse)
+def patch_cover_analysis(
+    book_id: int,
+    body: CoverAnalysisUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Update cover analysis (user edits). All fields optional."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    cover = crud.get_cover_analysis(db, book_id)
+    if not cover:
+        raise HTTPException(status_code=404, detail="Cover analysis not found. Run analysis first.")
+    updates = body.model_dump(exclude_unset=True)
+    if updates:
+        crud.create_or_update_cover_analysis(db, book_id, **updates)
+    updated = crud.get_cover_analysis(db, book_id)
+    return updated
+
+
 @router.patch("/books/{book_id}/engine-ratings", response_model=StatusResponse)
 def update_engine_rating(
     book_id: int,
@@ -524,3 +680,150 @@ def get_engine_ratings(book_id: int, db: Session = Depends(get_db)):
         )
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Visual Bible Entries (per-entity T2I images)
+# ---------------------------------------------------------------------------
+
+def get_vb_angles(entity_type: str, visual_bible_depth: int, is_main: bool) -> list[str]:
+    """Return angle labels for this entity type and depth. is_main increases depth."""
+    CHARACTER_ANGLES = ["front", "3/4 left", "3/4 right", "profile", "action pose", "close-up face"]
+    LOCATION_ANGLES = ["exterior wide", "interior", "atmospheric detail", "establishing shot"]
+    ARTEFACT_ANGLES = ["front", "back", "detail/open", "in-use context"]
+    depth = visual_bible_depth or (6 if is_main else 3)
+    if entity_type == "character":
+        return CHARACTER_ANGLES[:depth]
+    if entity_type == "location":
+        return LOCATION_ANGLES[: min(depth, 4)]
+    if entity_type == "artefact":
+        return ARTEFACT_ANGLES[: min(depth, 4)]
+    return []
+
+
+async def _run_vb_entry_t2i(entry_id: int, prompt: str, book_id: int) -> None:
+    """Background: call T2I stub and update entry (Phase 9 wires real provider)."""
+    from app.database import SessionLocal
+    from app.services.t2i_providers import ALL_T2I_PROVIDERS
+    from app.services.t2i_providers.base import T2IRequest
+
+    db = SessionLocal()
+    try:
+        provider = ALL_T2I_PROVIDERS.get("abstract")
+        if not provider:
+            db.close()
+            return
+        req = T2IRequest(prompt=prompt or "Visual bible entry", negative_prompt="")
+        result = await provider.generate(req)
+        crud.update_visual_bible_entry(db, entry_id, status="complete", prompt_used=prompt)
+        if result.image_path:
+            crud.update_visual_bible_entry(db, entry_id, image_path=result.image_path)
+    except Exception as e:
+        logger.exception("VB entry T2I failed for entry_id=%s: %s", entry_id, e)
+        crud.update_visual_bible_entry(db, entry_id, status="failed")
+    finally:
+        db.close()
+
+
+@router.get("/books/{book_id}/visual-bible/entries", response_model=list[VisualBibleEntryResponse])
+def get_visual_bible_entries(
+    book_id: int,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """List VB entries, optionally filtered by entity_type and/or entity_id."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    entries = crud.get_visual_bible_entries(db, book_id, entity_type=entity_type, entity_id=entity_id)
+    return [VisualBibleEntryResponse.model_validate(e) for e in entries]
+
+
+@router.post(
+    "/books/{book_id}/visual-bible/entries/generate",
+    response_model=VisualBibleEntryResponse,
+    status_code=202,
+)
+async def generate_visual_bible_entry(
+    book_id: int,
+    body: VisualBibleEntryGenerateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Create one VB entry with status=pending and queue T2I (stub)."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    entry = crud.create_visual_bible_entry(
+        db,
+        book_id=book_id,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        angle_label=body.angle_label,
+        prompt_used=body.prompt,
+    )
+    background_tasks.add_task(_run_vb_entry_t2i, entry.id, body.prompt or "", book_id)
+    return VisualBibleEntryResponse.model_validate(entry)
+
+
+@router.post("/books/{book_id}/visual-bible/entries/generate-all")
+async def generate_all_visual_bible_entries(
+    book_id: int,
+    background_tasks: BackgroundTasks,
+    body: Optional[VisualBibleEntryGenerateAllRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Queue VB entries for all (or filtered) entities; returns queued count and entries."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    entity_type_filter = (body and body.entity_type) or None
+    entries_created: list = []
+    characters = crud.get_characters_by_book(db, book_id) if entity_type_filter in (None, "character") else []
+    locations = crud.get_locations_by_book(db, book_id) if entity_type_filter in (None, "location") else []
+    artefacts = crud.get_artefacts_by_book(db, book_id) if entity_type_filter in (None, "artefact") else []
+    for c in characters:
+        angles = get_vb_angles("character", getattr(c, "visual_bible_depth", None) or 0, bool(getattr(c, "is_main", 0)))
+        for angle in angles:
+            entry = crud.create_visual_bible_entry(db, book_id, "character", c.id, angle_label=angle)
+            entries_created.append(entry)
+            background_tasks.add_task(_run_vb_entry_t2i, entry.id, None, book_id)
+    for loc in locations:
+        angles = get_vb_angles("location", getattr(loc, "visual_bible_depth", None) or 0, bool(getattr(loc, "is_main", 0)))
+        for angle in angles:
+            entry = crud.create_visual_bible_entry(db, book_id, "location", loc.id, angle_label=angle)
+            entries_created.append(entry)
+            background_tasks.add_task(_run_vb_entry_t2i, entry.id, None, book_id)
+    for a in artefacts:
+        angles = get_vb_angles("artefact", getattr(a, "visual_bible_depth", None) or 0, bool(getattr(a, "is_main", 0)))
+        for angle in angles:
+            entry = crud.create_visual_bible_entry(db, book_id, "artefact", a.id, angle_label=angle)
+            entries_created.append(entry)
+            background_tasks.add_task(_run_vb_entry_t2i, entry.id, None, book_id)
+    return {"queued": len(entries_created), "entries": [VisualBibleEntryResponse.model_validate(e) for e in entries_created]}
+
+
+@router.patch("/books/{book_id}/visual-bible/entries/{entry_id}", response_model=VisualBibleEntryResponse)
+def patch_visual_bible_entry(
+    book_id: int,
+    entry_id: int,
+    body: VisualBibleEntryPatchRequest,
+    db: Session = Depends(get_db),
+):
+    """Update is_approved, image_path, or status of a VB entry."""
+    book = crud.get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    entry = db.query(VisualBibleEntry).filter(
+        VisualBibleEntry.id == entry_id,
+        VisualBibleEntry.book_id == book_id,
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Visual bible entry not found")
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if updates:
+        crud.update_visual_bible_entry(db, entry_id, **updates)
+        db.refresh(entry)
+    entry = db.query(VisualBibleEntry).filter(VisualBibleEntry.id == entry_id).first()
+    return VisualBibleEntryResponse.model_validate(entry)

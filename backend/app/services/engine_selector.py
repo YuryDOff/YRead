@@ -5,6 +5,9 @@ engine affinity matrix, and per-book engine ratings.
 """
 from app.services.ontology_constants import ENTITY_PARENT
 
+# Cover always uses behance + dribbble + unsplash as primary (genre used for query tuning, not provider selection)
+COVER_PROVIDERS = ["behance", "dribbble", "unsplash", "serpapi"]
+
 ENGINE_AFFINITY: dict[str, dict[str, float]] = {
     # Human variants
     "human|fiction":               {"unsplash": 10, "pexels": 9},
@@ -70,6 +73,14 @@ ENGINE_AFFINITY: dict[str, dict[str, float]] = {
     "location|thriller":           {"unsplash": 8, "pexels": 7, "serpapi": 6},
     "location|adventure":          {"unsplash": 9, "pixabay": 7, "pexels": 7},
     "location|mystery":            {"unsplash": 8, "pexels": 7, "pixabay": 6},
+    # Artefacts (Phase 3) — keyed by entity_class only
+    "physical_weapon":            {"wikimedia": 1.4, "pexels": 1.2, "serpapi": 1.1},
+    "magical_item":               {"deviantart": 1.5, "serpapi": 1.3, "wikimedia": 1.1},
+    "document_scroll":            {"wikimedia": 1.6, "pexels": 1.1},
+    "vehicle":                    {"unsplash": 1.3, "pexels": 1.3, "wikimedia": 1.2},
+    "clothing_armour":            {"wikimedia": 1.4, "deviantart": 1.3, "pexels": 1.1},
+    "instrument_device":          {"unsplash": 1.3, "pexels": 1.2, "wikimedia": 1.2},
+    "other_artefact":             {"wikimedia": 1.2, "pexels": 1.1, "serpapi": 1.0},
 }
 
 _DEFAULT_SCORES: dict[str, float] = {"unsplash": 7.0, "serpapi": 5.0}
@@ -104,16 +115,29 @@ def select_engines(
 
     Returns list of up to top_n provider names (only from available_providers).
     """
+    if entity_type == "cover":
+        # Bypass affinity matrix; use cover-specific provider mix
+        selected = [p for p in COVER_PROVIDERS if p in available_providers][:top_n]
+        if len(selected) < top_n:
+            for p in available_providers:
+                if p not in selected:
+                    selected.append(p)
+                if len(selected) >= top_n:
+                    break
+        return selected
+
     if entity_type == "location":
         primary_key = f"location|{style_category}"
+    elif entity_type == "artefact":
+        primary_key = entity_class  # Artefact keys are entity_class only
     else:
         primary_key = f"{entity_class}|{style_category}"
 
     # Tier 1: exact match
     scores = ENGINE_AFFINITY.get(primary_key)
 
-    # Tier 2: parent class fallback
-    if scores is None and entity_type != "location":
+    # Tier 2: parent class fallback (not for location or artefact)
+    if scores is None and entity_type not in ("location", "artefact"):
         parent = ENTITY_PARENT.get(entity_class, "")
         if parent:
             parent_key = f"{parent}|{style_category}"
@@ -128,6 +152,8 @@ def select_engines(
     if scores is None:
         if entity_type == "location":
             scores = ENGINE_AFFINITY.get(f"location|fiction")
+        elif entity_type == "artefact":
+            scores = ENGINE_AFFINITY.get("other_artefact") or dict(_DEFAULT_SCORES)
         else:
             scores = ENGINE_AFFINITY.get(f"human|{style_category}") or ENGINE_AFFINITY.get("human|fiction")
 

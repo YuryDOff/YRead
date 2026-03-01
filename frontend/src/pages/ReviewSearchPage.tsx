@@ -1,15 +1,19 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Search, Loader2, ArrowLeft, User, MapPin, Film } from 'lucide-react';
+import { Search, Loader2, ArrowLeft, User, MapPin, Film, Package, BookMarked, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useBook } from '../context/BookContext';
 import {
   getProposedSearchQueries,
   patchEntitySummaries,
   searchReferences,
-  updateScene,
+  getCoverImages,
+  getProvidersStatus,
+  updateBook,
   ENABLED_PROVIDERS_STORAGE_KEY,
   type ProposedEntity,
   type ProposedScene,
+  type SearchEntityTypes,
+  type ProviderStatus,
 } from '../services/api';
 import { getPreferredSearchProvider } from '../hooks/useSettings';
 
@@ -23,10 +27,14 @@ export default function ReviewSearchPage() {
   const [running, setRunning] = useState(false);
   const [characters, setCharacters] = useState<(ProposedEntity & { queries: string[] })[]>([]);
   const [locations, setLocations] = useState<(ProposedEntity & { queries: string[] })[]>([]);
+  const [artefacts, setArtefacts] = useState<(ProposedEntity & { queries: string[] })[]>([]);
+  const [coverQueries, setCoverQueries] = useState<string[]>([]);
   const [scenes, setScenes] = useState<ProposedScene[]>([]);
   const [searchProvider, setSearchProvider] = useState<'unsplash' | 'serpapi' | ''>('');
-  const [searchEntityTypes, setSearchEntityTypes] = useState<'characters' | 'locations' | 'both'>('both');
-  const sceneDraftTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const [searchEntityTypes, setSearchEntityTypes] = useState<SearchEntityTypes>('both');
+  const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [searchEnginesOpen, setSearchEnginesOpen] = useState(false);
+  const [searchQueryStrategy, setSearchQueryStrategy] = useState<'tokens' | 'adaptive'>('tokens');
 
   const storageKey = bookId ? `review_search_options_${bookId}` : null;
 
@@ -37,13 +45,27 @@ export default function ReviewSearchPage() {
         if (raw) {
           const parsed = JSON.parse(raw) as { searchProvider?: string; searchEntityTypes?: string };
           if (parsed.searchProvider !== undefined) setSearchProvider(parsed.searchProvider as 'unsplash' | 'serpapi' | '');
-          if (parsed.searchEntityTypes !== undefined) setSearchEntityTypes(parsed.searchEntityTypes as 'characters' | 'locations' | 'both');
+          if (parsed.searchEntityTypes !== undefined) setSearchEntityTypes(parsed.searchEntityTypes as SearchEntityTypes);
         }
       } catch {
         // ignore
       }
     }
   }, [storageKey]);
+
+  useEffect(() => {
+    getProvidersStatus().then(setProviders).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!bookId) return;
+    try {
+      const raw = localStorage.getItem(`noctua_search_strategy_${bookId}`);
+      if (raw === 'adaptive' || raw === 'tokens') setSearchQueryStrategy(raw);
+    } catch {
+      // ignore
+    }
+  }, [bookId]);
 
   useEffect(() => {
     if (!bookId) {
@@ -57,16 +79,21 @@ export default function ReviewSearchPage() {
           data.characters.map((c) => ({
             ...c,
             queries: c.proposed_queries?.length ? [...c.proposed_queries] : [''],
-            text_to_image_prompt: c.text_to_image_prompt ?? '',
           })),
         );
         setLocations(
           data.locations.map((l) => ({
             ...l,
             queries: l.proposed_queries?.length ? [...l.proposed_queries] : [''],
-            text_to_image_prompt: l.text_to_image_prompt ?? '',
           })),
         );
+        setArtefacts(
+          (data.artefacts ?? []).map((a) => ({
+            ...a,
+            queries: a.proposed_queries?.length ? [...a.proposed_queries] : [''],
+          })),
+        );
+        setCoverQueries(data.cover?.proposed_queries?.length ? [...data.cover.proposed_queries] : ['']);
         setScenes(data.scenes ?? []);
       } catch {
         navigate(bookIdParam ? `/books/${bookIdParam}/analysis-review` : '/');
@@ -81,13 +108,17 @@ export default function ReviewSearchPage() {
     if (loading) return;
     const hasCharacters = characters.length > 0;
     const hasLocations = locations.length > 0;
-    const allowed: Array<'characters' | 'locations' | 'both'> = hasCharacters && hasLocations
-      ? ['both', 'characters', 'locations']
-      : hasCharacters
-        ? ['characters']
-        : hasLocations
-          ? ['locations']
-          : [];
+    const hasArtefacts = artefacts.length > 0;
+    const hasCover = coverQueries.length > 0;
+    const allowed: SearchEntityTypes[] = [];
+    if (hasCharacters || hasLocations) {
+      if (hasCharacters && hasLocations) allowed.push('both', 'characters', 'locations');
+      else if (hasCharacters) allowed.push('characters');
+      else allowed.push('locations');
+    }
+    if (hasArtefacts) allowed.push('artefacts');
+    if (hasCover) allowed.push('cover');
+    if (hasCharacters || hasLocations || hasArtefacts || hasCover) allowed.push('all');
     const valid = allowed.includes(searchEntityTypes);
     if (allowed.length === 1) {
       const only = allowed[0];
@@ -102,7 +133,7 @@ export default function ReviewSearchPage() {
     } else if (allowed.length > 1 && !valid) {
       setSearchEntityTypes(allowed[0]);
     }
-  }, [loading, characters.length, locations.length, storageKey, searchProvider]); // searchEntityTypes intentionally not in deps to avoid overwriting user choice when both exist
+  }, [loading, characters.length, locations.length, artefacts.length, coverQueries.length, storageKey, searchProvider]);
 
   function setCharSummary(id: number, summary: string) {
     setCharacters((prev) =>
@@ -112,11 +143,6 @@ export default function ReviewSearchPage() {
   function setCharQueries(id: number, queries: string[]) {
     setCharacters((prev) =>
       prev.map((c) => (c.id === id ? { ...c, queries } : c)),
-    );
-  }
-  function setCharPrompt(id: number, text_to_image_prompt: string) {
-    setCharacters((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, text_to_image_prompt } : c)),
     );
   }
   function setLocSummary(id: number, summary: string) {
@@ -129,18 +155,31 @@ export default function ReviewSearchPage() {
       prev.map((l) => (l.id === id ? { ...l, queries } : l)),
     );
   }
-  function setLocPrompt(id: number, text_to_image_prompt: string) {
-    setLocations((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, text_to_image_prompt } : l)),
+  function setArtefactQueries(id: number, queries: string[]) {
+    setArtefacts((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, queries } : a)),
     );
+  }
+  function setCoverQueriesAt(queries: string[]) {
+    setCoverQueries(queries);
   }
 
   async function handleRunSearch() {
     if (!bookId) return;
     const hasChars = characters.length > 0;
     const hasLocs = locations.length > 0;
-    const effectiveType: 'characters' | 'locations' | 'both' =
-      hasChars && hasLocs ? searchEntityTypes : hasChars ? 'characters' : 'locations';
+    const hasArt = artefacts.length > 0;
+    const hasCov = coverQueries.length > 0;
+    const allowedSearchTypes: SearchEntityTypes[] = [];
+    if (hasChars || hasLocs) {
+      if (hasChars && hasLocs) allowedSearchTypes.push('both', 'characters', 'locations');
+      else if (hasChars) allowedSearchTypes.push('characters');
+      else allowedSearchTypes.push('locations');
+    }
+    if (hasArt) allowedSearchTypes.push('artefacts');
+    if (hasCov) allowedSearchTypes.push('cover');
+    if (hasChars || hasLocs || hasArt || hasCov) allowedSearchTypes.push('all');
+    let effectiveType: SearchEntityTypes = allowedSearchTypes.includes(searchEntityTypes) ? searchEntityTypes : (allowedSearchTypes[0] ?? 'both');
 
     setRunning(true);
     try {
@@ -148,14 +187,15 @@ export default function ReviewSearchPage() {
         characters: characters.map((c) => ({
           id: c.id,
           physical_description: c.summary || undefined,
-          text_to_image_prompt: c.text_to_image_prompt ?? '',
         })),
         locations: locations.map((l) => ({
           id: l.id,
           visual_description: l.summary || undefined,
-          text_to_image_prompt: l.text_to_image_prompt ?? '',
         })),
       });
+      if (searchQueryStrategy) {
+        await updateBook(bookId, { search_query_strategy: searchQueryStrategy });
+      }
 
       // Always send queries for every entity on the page so backend uses only these (no fallback to auto-built).
       const charQueries: Record<string, string[]> = {};
@@ -178,18 +218,27 @@ export default function ReviewSearchPage() {
       } catch {
         // ignore
       }
+      const artQueries: Record<string, string[]> = {};
+      artefacts.forEach((a) => {
+        const qs = a.queries.map((s) => s.trim()).filter(Boolean);
+        if (qs.length) artQueries[String(a.id)] = qs;
+      });
+      const covQueries = hasCov ? coverQueries.map((q) => q.trim()).filter(Boolean) : undefined;
       const refs = await searchReferences(bookId, true, {
         character_queries: charQueries,
         location_queries: locQueries,
+        ...(Object.keys(artQueries).length ? { artefact_queries: artQueries } : {}),
+        ...(covQueries?.length ? { cover_queries: covQueries } : {}),
         ...(preferredProvider ? { preferred_provider: preferredProvider } : {}),
         search_entity_types: effectiveType,
         ...(enabledProviders ? { enabled_providers: enabledProviders } : {}),
       });
-      // Keep previous reference images for the entity type we did not search
       const prev = ctx.referenceImages;
       ctx.setReferenceImages({
-        characters: effectiveType === 'locations' && prev?.characters ? prev.characters : refs.characters,
-        locations: effectiveType === 'characters' && prev?.locations ? prev.locations : refs.locations,
+        characters: (effectiveType === 'locations' || effectiveType === 'artefacts' || effectiveType === 'cover') && prev?.characters ? prev.characters : (refs.characters ?? {}),
+        locations: (effectiveType === 'characters' || effectiveType === 'artefacts' || effectiveType === 'cover') && prev?.locations ? prev.locations : (refs.locations ?? {}),
+        artefacts: (effectiveType !== 'artefacts' && effectiveType !== 'all') && prev?.artefacts ? prev.artefacts : (refs.artefacts ?? {}),
+        cover: (effectiveType !== 'cover' && effectiveType !== 'all') && prev?.cover ? prev.cover : (refs.cover ?? undefined),
       });
       if (storageKey) {
         try {
@@ -198,8 +247,19 @@ export default function ReviewSearchPage() {
           // ignore
         }
       }
-      const initialTab = effectiveType === 'locations' ? 'locations' : 'characters';
-      navigate(bookId ? `/books/${bookId}/review-search-result` : '/review-search-result', { state: { initialTab } });
+      const initialTab =
+        effectiveType === 'locations' ? 'locations'
+        : effectiveType === 'artefacts' ? 'artefacts'
+        : effectiveType === 'cover' ? 'cover'
+        : 'characters';
+      const coverForPass = (effectiveType !== 'cover' && effectiveType !== 'all') && prev?.cover ? prev.cover : refs.cover;
+      const refsToPass = {
+        characters: (effectiveType === 'locations' || effectiveType === 'artefacts' || effectiveType === 'cover') && prev?.characters ? prev.characters : (refs.characters ?? {}),
+        locations: (effectiveType === 'characters' || effectiveType === 'artefacts' || effectiveType === 'cover') && prev?.locations ? prev.locations : (refs.locations ?? {}),
+        artefacts: (effectiveType !== 'artefacts' && effectiveType !== 'all') && prev?.artefacts ? prev.artefacts : (refs.artefacts ?? {}),
+        cover: coverForPass ? { cover: getCoverImages({ cover: coverForPass }) } : undefined,
+      };
+      navigate(bookId ? `/books/${bookId}/review-search-result` : '/review-search-result', { state: { initialTab, referenceImages: refsToPass } });
     } catch (err) {
       console.error('Search failed', err);
       alert('Reference image search failed. Please try again.');
@@ -208,15 +268,16 @@ export default function ReviewSearchPage() {
     }
   }
 
-  function handleSceneDraftChange(sceneId: number, draft: string) {
-    setScenes((prev) =>
-      prev.map((s) => (s.id === sceneId ? { ...s, scene_prompt_draft: draft } : s)),
-    );
-    if (!bookId) return;
-    clearTimeout(sceneDraftTimers.current[sceneId]);
-    sceneDraftTimers.current[sceneId] = setTimeout(() => {
-      updateScene(bookId, sceneId, { scene_prompt_draft: draft }).catch(console.error);
-    }, 800);
+  function handleSearchStrategyChange(value: 'tokens' | 'adaptive') {
+    setSearchQueryStrategy(value);
+    if (bookId) {
+      try {
+        localStorage.setItem(`noctua_search_strategy_${bookId}`, value);
+      } catch {
+        // ignore
+      }
+      updateBook(bookId, { search_query_strategy: value }).catch(console.error);
+    }
   }
 
   if (!bookId) return null;
@@ -230,27 +291,26 @@ export default function ReviewSearchPage() {
 
   const hasCharacters = characters.length > 0;
   const hasLocations = locations.length > 0;
-  const searchForOptions: Array<{ value: 'characters' | 'locations' | 'both'; label: string }> =
-    hasCharacters && hasLocations
-      ? [
-          { value: 'both', label: 'Characters & locations' },
-          { value: 'characters', label: 'Characters only' },
-          { value: 'locations', label: 'Locations only' },
-        ]
-      : hasCharacters
-        ? [{ value: 'characters', label: 'Characters only' }]
-        : hasLocations
-          ? [{ value: 'locations', label: 'Locations only' }]
-          : [];
+  const hasArtefacts = artefacts.length > 0;
+  const hasCover = coverQueries.length > 0;
+  const searchForOptions: Array<{ value: SearchEntityTypes; label: string }> = [];
+  if (hasCharacters && hasLocations) {
+    searchForOptions.push({ value: 'both', label: 'Characters & locations' }, { value: 'characters', label: 'Characters only' }, { value: 'locations', label: 'Locations only' });
+  } else if (hasCharacters) searchForOptions.push({ value: 'characters', label: 'Characters only' });
+  else if (hasLocations) searchForOptions.push({ value: 'locations', label: 'Locations only' });
+  if (hasArtefacts) searchForOptions.push({ value: 'artefacts', label: 'Artefacts only' });
+  if (hasCover) searchForOptions.push({ value: 'cover', label: 'Cover only' });
+  if (hasCharacters || hasLocations || hasArtefacts || hasCover) searchForOptions.push({ value: 'all', label: 'All (characters, locations, artefacts, cover)' });
 
-  const effectiveSearchEntityTypes = searchForOptions.some((o) => o.value === searchEntityTypes)
-    ? searchEntityTypes
-    : (searchForOptions[0]?.value ?? 'both');
-  const totalEntities = characters.length + locations.length;
+  const effectiveSearchEntityTypes = searchForOptions.some((o) => o.value === searchEntityTypes) ? searchEntityTypes : (searchForOptions[0]?.value ?? 'both');
+  const totalEntities = characters.length + locations.length + artefacts.length + (hasCover ? 1 : 0);
   const searchableCount =
-    effectiveSearchEntityTypes === 'both' ? totalEntities
+    effectiveSearchEntityTypes === 'both' ? characters.length + locations.length
     : effectiveSearchEntityTypes === 'characters' ? characters.length
-    : locations.length;
+    : effectiveSearchEntityTypes === 'locations' ? locations.length
+    : effectiveSearchEntityTypes === 'artefacts' ? artefacts.length
+    : effectiveSearchEntityTypes === 'cover' ? (hasCover ? 1 : 0)
+    : totalEntities;
   const canRunSearch = searchableCount > 0;
 
   return (
@@ -264,10 +324,79 @@ export default function ReviewSearchPage() {
             {ctx.book?.title}
           </p>
           <p className="text-sepia/70 font-ui text-xs max-w-lg mx-auto">
-            Edit the AI summary, reference image search queries, and text-to-image prompt per entity.
-            Then run the search.
+            Edit the AI summary and reference image search queries per entity. Then run the search.
           </p>
         </div>
+
+        {/* Search Engines panel (7.7.3) — collapsible */}
+        <section className="p-4 rounded-xl border border-sepia/15 bg-white/50 space-y-3">
+          <button
+            type="button"
+            onClick={() => setSearchEnginesOpen((o) => !o)}
+            className="flex items-center gap-2 w-full text-left font-display text-sm font-semibold text-charcoal"
+          >
+            {searchEnginesOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            Search engines for this session
+          </button>
+          {searchEnginesOpen && (
+            <>
+              <p className="font-ui text-xs text-sepia/70">
+                Changes here apply to the current search only. Default engines are set in Settings.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {providers.map((p) => {
+                  let enabled: string[] = [];
+                  try {
+                    const raw = localStorage.getItem(ENABLED_PROVIDERS_STORAGE_KEY);
+                    if (raw) {
+                      const parsed = JSON.parse(raw);
+                      if (Array.isArray(parsed)) enabled = parsed;
+                    }
+                  } catch {
+                    // ignore
+                  }
+                  const isOn = enabled.length === 0 ? true : enabled.includes(p.name);
+                  const toggle = () => {
+                    const next = isOn ? enabled.filter((x) => x !== p.name) : [...enabled, p.name];
+                    const toStore = next.length > 0 ? next : providers.map((x) => x.name);
+                    try {
+                      localStorage.setItem(ENABLED_PROVIDERS_STORAGE_KEY, JSON.stringify(toStore));
+                    } catch {
+                      // ignore
+                    }
+                    setProviders([...providers]);
+                  };
+                  return (
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={toggle}
+                      className={`px-3 py-1.5 rounded-full font-ui text-xs border transition-colors ${
+                        isOn ? 'bg-golden/20 border-golden text-charcoal' : 'border-sepia/20 text-sepia'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="pt-2 border-t border-sepia/10">
+                <span className="block font-ui text-xs text-sepia uppercase tracking-wide mb-2">Query strategy</span>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="strategy" checked={searchQueryStrategy === 'tokens'} onChange={() => handleSearchStrategyChange('tokens')} className="rounded-full" />
+                    <span className="font-ui text-sm">Compact keywords</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="strategy" checked={searchQueryStrategy === 'adaptive'} onChange={() => handleSearchStrategyChange('adaptive')} className="rounded-full" />
+                    <span className="font-ui text-sm">Adaptive</span>
+                  </label>
+                </div>
+                <p className="font-ui text-[10px] text-sepia/70 mt-1">Compact = same tokens for all engines. Adaptive = sentences for Google, keywords for tag-based.</p>
+              </div>
+            </>
+          )}
+        </section>
 
         {/* Search options */}
         <section className="p-4 rounded-xl border border-sepia/15 bg-white/50 space-y-4">
@@ -276,7 +405,7 @@ export default function ReviewSearchPage() {
           </h2>
           <div className="flex flex-wrap gap-6">
             <div className="space-y-2">
-              <label className="block font-ui text-xs text-sepia">Search engine</label>
+              <label className="block font-ui text-xs text-sepia">Preferred provider</label>
               <select
                 value={searchProvider}
                 onChange={(e) => {
@@ -297,7 +426,7 @@ export default function ReviewSearchPage() {
               <select
                 value={effectiveSearchEntityTypes}
                 onChange={(e) => {
-                  const v = e.target.value as 'characters' | 'locations' | 'both';
+                  const v = e.target.value as SearchEntityTypes;
                   setSearchEntityTypes(v);
                   if (storageKey) try { localStorage.setItem(storageKey, JSON.stringify({ searchProvider, searchEntityTypes: v })); } catch { /* ignore */ }
                 }}
@@ -332,10 +461,8 @@ export default function ReviewSearchPage() {
                   name={c.name}
                   summary={c.summary}
                   queries={c.queries}
-                  textToImagePrompt={c.text_to_image_prompt ?? ''}
                   onSummaryChange={(s) => setCharSummary(c.id, s)}
                   onQueriesChange={(q) => setCharQueries(c.id, q)}
-                  onPromptChange={(p) => setCharPrompt(c.id, p)}
                 />
               ))}
             </div>
@@ -355,11 +482,68 @@ export default function ReviewSearchPage() {
                   name={l.name}
                   summary={l.summary}
                   queries={l.queries}
-                  textToImagePrompt={l.text_to_image_prompt ?? ''}
                   onSummaryChange={(s) => setLocSummary(l.id, s)}
                   onQueriesChange={(q) => setLocQueries(l.id, q)}
-                  onPromptChange={(p) => setLocPrompt(l.id, p)}
                 />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {artefacts.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="font-display text-lg font-semibold text-charcoal flex items-center gap-2">
+              <Package size={18} className="text-golden" />
+              Artefacts
+            </h2>
+            <div className="space-y-4">
+              {artefacts.map((a) => (
+                <EntityReviewCard
+                  key={a.id}
+                  name={a.name}
+                  summary={a.summary}
+                  queries={a.queries}
+                  onSummaryChange={() => {}}
+                  onQueriesChange={(q) => setArtefactQueries(a.id, q)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {coverQueries.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="font-display text-lg font-semibold text-charcoal flex items-center gap-2">
+              <BookMarked size={18} className="text-golden" />
+              Cover
+            </h2>
+            <p className="font-ui text-xs text-sepia/70">Proposed search queries for cover concept.</p>
+            <div className="space-y-2">
+              {coverQueries.map((q, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={q}
+                    onChange={(e) =>
+                      setCoverQueries((prev) => {
+                        const next = [...prev];
+                        next[i] = e.target.value;
+                        return next;
+                      })
+                    }
+                    placeholder="e.g. dark fantasy book cover"
+                    className="flex-1 px-3 py-2 rounded-lg border border-sepia/20 font-ui text-sm text-charcoal bg-white focus:outline-none focus:ring-2 focus:ring-golden/40"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => coverQueries.length > 1 && setCoverQueries((prev) => prev.filter((_, j) => j !== i))}
+                    disabled={coverQueries.length <= 1}
+                    className="px-2 text-sepia hover:text-charcoal disabled:opacity-40 font-ui text-sm"
+                    aria-label="Remove query"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               ))}
             </div>
           </section>
@@ -376,19 +560,14 @@ export default function ReviewSearchPage() {
             <h2 className="font-display text-lg font-semibold text-charcoal flex items-center gap-2">
               <Film size={18} className="text-golden" />
               Scenes
-              <span className="ml-auto font-ui text-xs text-sepia/60">Review & edit only</span>
+              <span className="ml-auto font-ui text-xs text-sepia/60">Read-only reference</span>
             </h2>
             <p className="font-ui text-xs text-sepia/70">
-              Review scene prompts before running search. Edit the draft prompt if needed.
-              The AI prompt preview is read-only.
+              Scene list for context. T2I prompts are edited in Cover Studio / Text Studio.
             </p>
             <div className="space-y-4">
               {scenes.map((scene) => (
-                <SceneReviewCard
-                  key={scene.id}
-                  scene={scene}
-                  onDraftChange={(draft) => handleSceneDraftChange(scene.id, draft)}
-                />
+                <SceneReviewCard key={scene.id} scene={scene} />
               ))}
             </div>
           </section>
@@ -432,54 +611,31 @@ export default function ReviewSearchPage() {
   );
 }
 
-function SceneReviewCard({
-  scene,
-  onDraftChange,
-}: {
-  scene: ProposedScene;
-  onDraftChange: (draft: string) => void;
-}) {
+function SceneReviewCard({ scene }: { scene: ProposedScene }) {
   return (
     <div className="p-4 rounded-xl border border-sepia/15 bg-white/50 space-y-3">
-      <div className="flex items-start gap-2">
-        <div className="flex-1">
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            {(scene.title_display ?? scene.title) && (
-              <h3 className="font-display font-semibold text-charcoal text-sm">
-                {scene.title_display ?? scene.title}
-              </h3>
-            )}
-            {scene.scene_type && (
-              <span className="px-2 py-0.5 rounded-full bg-sepia/10 text-sepia font-ui text-xs">
-                {scene.scene_type}
-              </span>
-            )}
-            {scene.illustration_priority && (
-              <span className="px-2 py-0.5 rounded-full bg-golden/10 text-golden font-ui text-xs">
-                {scene.illustration_priority}
-              </span>
-            )}
-          </div>
-          {(scene.narrative_summary_display ?? scene.narrative_summary) && (
-            <p className="font-body text-xs text-sepia leading-relaxed">
-              {scene.narrative_summary_display ?? scene.narrative_summary}
-            </p>
-          )}
-        </div>
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        {(scene.title_display ?? scene.title) && (
+          <h3 className="font-display font-semibold text-charcoal text-sm">
+            {scene.title_display ?? scene.title}
+          </h3>
+        )}
+        {scene.scene_type && (
+          <span className="px-2 py-0.5 rounded-full bg-sepia/10 text-sepia font-ui text-xs">
+            {scene.scene_type}
+          </span>
+        )}
+        {scene.illustration_priority && (
+          <span className="px-2 py-0.5 rounded-full bg-golden/10 text-golden font-ui text-xs">
+            {scene.illustration_priority}
+          </span>
+        )}
       </div>
-      <div>
-        <label className="block font-ui text-xs text-sepia uppercase tracking-wide mb-1">
-          Scene prompt draft
-        </label>
-        <textarea
-          value={scene.scene_prompt_draft ?? ''}
-          onChange={(e) => onDraftChange(e.target.value)}
-          rows={2}
-          className="w-full px-3 py-2 rounded-lg border border-sepia/20 font-body text-sm
-                     text-charcoal placeholder-sepia/50 focus:border-golden focus:outline-none resize-none"
-          placeholder="Describe the visual scene for illustration…"
-        />
-      </div>
+      {(scene.narrative_summary_display ?? scene.narrative_summary) && (
+        <p className="font-body text-xs text-sepia leading-relaxed">
+          {scene.narrative_summary_display ?? scene.narrative_summary}
+        </p>
+      )}
       {scene.t2i_prompt_json?.abstract && (
         <div>
           <label className="block font-ui text-xs text-sepia uppercase tracking-wide mb-1">
@@ -498,18 +654,14 @@ function EntityReviewCard({
   name,
   summary,
   queries,
-  textToImagePrompt,
   onSummaryChange,
   onQueriesChange,
-  onPromptChange,
 }: {
   name: string;
   summary: string;
   queries: string[];
-  textToImagePrompt: string;
   onSummaryChange: (s: string) => void;
   onQueriesChange: (q: string[]) => void;
-  onPromptChange: (p: string) => void;
 }) {
   function setQueryAt(i: number, value: string) {
     const next = [...queries];
@@ -574,19 +726,6 @@ function EntityReviewCard({
             + Add query
           </button>
         </div>
-      </div>
-      <div>
-        <label className="block font-ui text-xs text-sepia uppercase tracking-wide mb-1">
-          Text-to-image prompt
-        </label>
-        <textarea
-          value={textToImagePrompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-          rows={2}
-          className="w-full px-3 py-2 rounded-lg border border-sepia/20 font-body text-sm
-                     text-charcoal placeholder-sepia/50 focus:border-golden focus:outline-none"
-          placeholder="e.g. core tokens, style tokens, ultra detailed, cinematic lighting"
-        />
       </div>
     </div>
   );

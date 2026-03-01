@@ -21,6 +21,9 @@ interface AuthorWorkflowState {
   similarBookTitle: string;
   mainOnlyReferences: boolean;
   sceneCount: number;
+  genre: string;
+  workflowType: string;
+  entityTypes: string[];
 }
 
 interface AuthorWorkflowContextValue extends AuthorWorkflowState {
@@ -38,6 +41,9 @@ interface AuthorWorkflowContextValue extends AuthorWorkflowState {
   setSimilarBookTitle: (s: string) => void;
   setMainOnlyReferences: (b: boolean) => void;
   setSceneCount: (n: number) => void;
+  setGenre: (s: string) => void;
+  setWorkflowType: (s: string) => void;
+  setEntityTypes: (arr: string[]) => void;
   reset: () => void;
 }
 
@@ -56,6 +62,9 @@ const defaults: AuthorWorkflowState = {
   similarBookTitle: '',
   mainOnlyReferences: true,
   sceneCount: 10,
+  genre: '',
+  workflowType: 'full',
+  entityTypes: ['cover', 'characters', 'locations', 'artefacts'],
 };
 
 const AuthorWorkflowContext = createContext<AuthorWorkflowContextValue | undefined>(undefined);
@@ -82,6 +91,9 @@ export function AuthorWorkflowProvider({ children }: { children: ReactNode }) {
     setSimilarBookTitle: (similarBookTitle) => patch({ similarBookTitle }),
     setMainOnlyReferences: (mainOnlyReferences) => patch({ mainOnlyReferences }),
     setSceneCount: (sceneCount) => patch({ sceneCount }),
+    setGenre: (genre) => patch({ genre }),
+    setWorkflowType: (workflowType) => patch({ workflowType }),
+    setEntityTypes: (entityTypes) => patch({ entityTypes }),
     reset: () => setState(defaults),
   };
 

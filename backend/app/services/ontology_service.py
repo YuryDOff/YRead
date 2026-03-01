@@ -12,7 +12,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from app.services.ontology_constants import ENTITY_CLASSES, NON_HUMAN_CLASSES
+from app.services.ontology_constants import ENTITY_CLASSES, NON_HUMAN_CLASSES, ARTEFACT_ENTITY_CLASSES
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +64,40 @@ RULES:
   or keep as the most relevant class; set anti_human_override = false for locations
 """
 
+ONTOLOGY_ARTEFACT_PROMPT = f"""
+You are classifying narrative artefacts (objects, items) for visual image search.
 
-def classify_entities_batch(entities: list[dict]) -> list[dict]:
+For each artefact, select entity_class from EXACTLY this list:
+{", ".join(ARTEFACT_ENTITY_CLASSES)}
+
+Return ONLY valid JSON array, one object per entity:
+[
+  {{
+    "name": "artefact name",
+    "entity_class": "<one value from the list above>",
+    "materiality": "organic|mechanical|holographic|energy-based|hybrid|immaterial",
+    "power_status": "dominant|subordinate|assistant|childlike|corrupted|neutral",
+    "embodiment": "physical|digital_avatar|disembodied|amorphous",
+    "visual_markers": ["3 to 6 concrete visual markers"],
+    "anti_human_override": true or false,
+    "search_archetype": "short visual archetype phrase for image search, or null"
+  }}
+]
+
+RULES:
+- All output must be in ENGLISH.
+- For artefacts, anti_human_override is typically false (objects are not human).
+- visual_markers must be concrete and visual (e.g. "rusted blade", "glowing runes").
+- visual_markers must have exactly 3 to 6 items.
+- Output order MUST match input order exactly.
+"""
+
+
+def classify_entities_batch(entities: list[dict], entity_role: Optional[str] = None) -> list[dict]:
     """
-    Single LLM call for all entities (characters + locations).
+    Single LLM call for all entities (characters + locations + artefacts).
 
-    Input:  [{"name": ..., "description": ..., "visual_type": ...}]
+    Input:  [{"name": ..., "description": ..., "visual_type": ...}]; optional entity_role="artefact".
     Output: [{"name": ..., "entity_class": ..., "materiality": ..., ...}]
 
     Output order matches input order. Falls back gracefully on parse errors.
@@ -79,15 +107,21 @@ def classify_entities_batch(entities: list[dict]) -> list[dict]:
 
     client = _get_client()
 
-    user_content = json.dumps(entities, ensure_ascii=False)
+    # Don't send entity_role in payload if present on each entity
+    user_entities = [{k: v for k, v in e.items() if k != "entity_role"} for e in entities]
+    user_content = json.dumps(user_entities, ensure_ascii=False)
 
-    logger.info("[ontology] classify_entities_batch: %d entities", len(entities))
+    is_artefact = entity_role == "artefact"
+    system_prompt = ONTOLOGY_ARTEFACT_PROMPT if is_artefact else ONTOLOGY_PROMPT
+    allowed_classes = ARTEFACT_ENTITY_CLASSES if is_artefact else ENTITY_CLASSES
+
+    logger.info("[ontology] classify_entities_batch: %d entities (artefact=%s)", len(entities), is_artefact)
 
     try:
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": ONTOLOGY_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.1,
@@ -101,7 +135,7 @@ def classify_entities_batch(entities: list[dict]) -> list[dict]:
         )
     except Exception as e:
         logger.error("[ontology] LLM call failed: %s", e)
-        return _build_fallback_results(entities)
+        return _build_fallback_results(entities, entity_role=entity_role)
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
@@ -114,27 +148,31 @@ def classify_entities_batch(entities: list[dict]) -> list[dict]:
             raise ValueError("Expected JSON array")
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("[ontology] Failed to parse response: %s | raw: %s", e, raw[:500])
-        return _build_fallback_results(entities)
+        return _build_fallback_results(entities, entity_role=entity_role)
 
     # Validate and normalise each result
     validated = []
     for i, item in enumerate(results):
         if not isinstance(item, dict):
-            validated.append(_fallback_for_entity(entities[i] if i < len(entities) else {}))
+            validated.append(_fallback_for_entity(entities[i] if i < len(entities) else {}, entity_role=entity_role))
             continue
 
-        entity_class = item.get("entity_class", "human")
-        if entity_class not in ENTITY_CLASSES:
-            logger.warning("[ontology] Unknown entity_class '%s', defaulting to 'human'", entity_class)
-            entity_class = "human"
+        entity_class = item.get("entity_class", "human" if not is_artefact else "other_artefact")
+        if entity_class not in allowed_classes:
+            default_class = "other_artefact" if is_artefact else "human"
+            logger.warning("[ontology] Unknown entity_class '%s', defaulting to '%s'", entity_class, default_class)
+            entity_class = default_class
             item["entity_class"] = entity_class
 
-        # Enforce anti_human_override logic
-        expected_override = entity_class in NON_HUMAN_CLASSES
-        item["anti_human_override"] = expected_override
+        # Enforce anti_human_override logic (for characters/locations; artefacts usually false)
+        if is_artefact:
+            item["anti_human_override"] = bool(item.get("anti_human_override", False))
+        else:
+            expected_override = entity_class in NON_HUMAN_CLASSES
+            item["anti_human_override"] = expected_override
 
         # Ensure search_archetype present when override=True
-        if expected_override and not item.get("search_archetype"):
+        if item["anti_human_override"] and not item.get("search_archetype"):
             item["search_archetype"] = entity_class.replace("_", " ")
 
         # Ensure visual_markers count is 3-6
@@ -150,13 +188,25 @@ def classify_entities_batch(entities: list[dict]) -> list[dict]:
     # If LLM returned fewer items than entities (truncated), pad with fallbacks
     while len(validated) < len(entities):
         idx = len(validated)
-        validated.append(_fallback_for_entity(entities[idx] if idx < len(entities) else {}))
+        validated.append(_fallback_for_entity(entities[idx] if idx < len(entities) else {}, entity_role=entity_role))
 
     return validated[:len(entities)]
 
 
-def _fallback_for_entity(entity: dict) -> dict:
+def _fallback_for_entity(entity: dict, entity_role: Optional[str] = None) -> dict:
     """Return a safe default ontology dict for an entity when LLM fails."""
+    is_artefact = entity_role == "artefact"
+    if is_artefact:
+        return {
+            "name": entity.get("name", ""),
+            "entity_class": "other_artefact",
+            "materiality": "organic",
+            "power_status": "neutral",
+            "embodiment": "physical",
+            "visual_markers": ["detailed object", "dramatic lighting", "high contrast"],
+            "anti_human_override": False,
+            "search_archetype": None,
+        }
     visual_type = (entity.get("visual_type") or "").lower()
     if visual_type in ("ai", "robot", "android", "alien", "creature"):
         entity_class = "robot" if visual_type in ("ai", "robot", "android") else "alien"
@@ -177,5 +227,5 @@ def _fallback_for_entity(entity: dict) -> dict:
     }
 
 
-def _build_fallback_results(entities: list[dict]) -> list[dict]:
-    return [_fallback_for_entity(e) for e in entities]
+def _build_fallback_results(entities: list[dict], entity_role: Optional[str] = None) -> list[dict]:
+    return [_fallback_for_entity(e, entity_role=entity_role) for e in entities]

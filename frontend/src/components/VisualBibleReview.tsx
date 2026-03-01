@@ -1,25 +1,31 @@
 import { useState } from 'react';
-import { Check, User, MapPin, Palette, Loader2, Upload, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Check, User, MapPin, Loader2, Upload, ThumbsUp, ThumbsDown, Package, BookMarked } from 'lucide-react';
 import { rateEngine } from '../services/api';
-import type { Character, Location, VisualBible, ReferenceImages, ReferenceImageItem, EngineRatingResponse } from '../services/api';
+import type { Character, Location, VisualBible, ReferenceImages, ReferenceImageItem, EngineRatingResponse, Artefact } from '../services/api';
+import { getCoverImages } from '../services/api';
 
-type Tab = 'characters' | 'locations' | 'style';
+type Tab = 'characters' | 'locations' | 'artefacts' | 'cover';
 
 interface Props {
   characters: Character[];
   locations: Location[];
+  artefacts?: Artefact[];
   visualBible: VisualBible;
   referenceImages: ReferenceImages | null;
   engineRatings?: EngineRatingResponse[];
   onApprove: (
     charSelections: Record<number, string[]>,
     locSelections: Record<number, string[]>,
+    artefactSelections?: Record<string, string[]>,
+    coverSelections?: string[],
   ) => void;
   loading?: boolean;
   pageTitle?: string;
   pageDescription?: string;
   bookId?: number;
-  onUploadImage?: (entityType: 'character' | 'location', entityId: number) => void;
+  onUploadImage?: (entityType: 'character' | 'location' | 'artefact' | 'cover', entityId: number) => void;
+  /** For cover uploads, entityId must be the book's cover_analysis id. Pass it when cover tab is used. */
+  coverEntityId?: number;
   onRefsUpdated?: () => void;
   onRatingUpdate?: () => void;
   initialTab?: Tab;
@@ -28,6 +34,7 @@ interface Props {
 export default function VisualBibleReview({
   characters,
   locations,
+  artefacts = [],
   visualBible,
   referenceImages,
   engineRatings = [],
@@ -37,6 +44,7 @@ export default function VisualBibleReview({
   pageDescription = 'Review and select reference images for your characters and locations',
   bookId,
   onUploadImage,
+  coverEntityId,
   onRefsUpdated,
   onRatingUpdate,
   initialTab,
@@ -62,16 +70,43 @@ export default function VisualBibleReview({
     });
     return init;
   });
+  const [artefactSel, setArtefactSel] = useState<Record<number, string[]>>(() => {
+    const init: Record<number, string[]> = {};
+    artefacts.forEach((a) => {
+      const urls = a.selected_reference_urls?.length
+        ? [...a.selected_reference_urls]
+        : (a.reference_image_url ? [a.reference_image_url] : []);
+      if (urls.length) init[a.id] = urls;
+    });
+    return init;
+  });
+  const coverImages = getCoverImages(referenceImages);
+  const [coverSel, setCoverSel] = useState<string[]>(() => {
+    return [];
+  });
 
   const charReady = characters.filter((c) => (charSel[c.id]?.length ?? 0) > 0).length;
   const locReady = locations.filter((l) => (locSel[l.id]?.length ?? 0) > 0).length;
-  const allReady = charReady === characters.length && locReady === locations.length;
+  const artefactReady = artefacts.length === 0 || artefacts.filter((a) => (artefactSel[a.id]?.length ?? 0) > 0).length === artefacts.length;
+  const coverReady = coverImages.length === 0 || coverSel.length > 0;
+  const allReady =
+    charReady === characters.length &&
+    locReady === locations.length &&
+    artefactReady &&
+    coverReady;
 
-  const TABS: { id: Tab; label: string; icon: typeof User }[] = [
+  const baseTabs: { id: Tab; label: string; icon: typeof User }[] = [
     { id: 'characters', label: `Characters (${charReady}/${characters.length})`, icon: User },
     { id: 'locations', label: `Locations (${locReady}/${locations.length})`, icon: MapPin },
-    { id: 'style', label: 'Style Summary', icon: Palette },
   ];
+  if (artefacts.length > 0) {
+    const artReady = artefacts.filter((a) => (artefactSel[a.id]?.length ?? 0) > 0).length;
+    baseTabs.push({ id: 'artefacts', label: `Artefacts (${artReady}/${artefacts.length})`, icon: Package });
+  }
+  if (coverImages.length > 0) {
+    baseTabs.push({ id: 'cover', label: `Cover (${coverSel.length > 0 ? '1' : '0'}/1)`, icon: BookMarked });
+  }
+  const TABS = baseTabs;
 
   return (
     <div className="w-full max-w-4xl space-y-6">
@@ -176,19 +211,69 @@ export default function VisualBibleReview({
           </div>
         )}
 
-        {tab === 'style' && (
-          <div className="space-y-4 p-4 rounded-xl bg-white/50 border border-sepia/15">
-            <Row label="Style" value={visualBible.style_category} />
-            <Row label="Tone" value={visualBible.tone_description} />
-            <Row label="Frequency" value={`Every ${visualBible.illustration_frequency} pages`} />
-            <Row label="Layout" value={visualBible.layout_style === 'inline_classic' ? 'Inline Classic' : 'Anime Panels'} />
+        {tab === 'artefacts' && (
+          <div className="space-y-6">
+            {artefacts.map((a) => {
+              const images = referenceImages?.artefacts?.[a.name] ?? [];
+              return (
+                <EntityCard
+                  key={a.id}
+                  name={a.name}
+                  description={a.physical_description ?? ''}
+                  extra=""
+                  images={images}
+                  selectedUrls={artefactSel[a.id] ?? []}
+                  onToggleSelect={(url) => {
+                    setArtefactSel((p) => {
+                      const prev = p[a.id] ?? [];
+                      const next = prev.includes(url)
+                        ? prev.filter((u) => u !== url)
+                        : [...prev, url];
+                      return { ...p, [a.id]: next };
+                    });
+                  }}
+                  onUploadImage={bookId && onUploadImage ? () => onUploadImage('artefact', a.id) : undefined}
+                  bookId={bookId}
+                  engineRatings={engineRatings}
+                  onRatingUpdate={onRatingUpdate}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {tab === 'cover' && (
+          <div className="space-y-6">
+            <EntityCard
+              name="Cover"
+              description="Select reference images for the book cover concept."
+              extra=""
+              images={coverImages}
+              selectedUrls={coverSel}
+              onToggleSelect={(url) => {
+                setCoverSel((p) =>
+                  p.includes(url) ? p.filter((u) => u !== url) : [...p, url],
+                );
+              }}
+              onUploadImage={bookId && onUploadImage && coverEntityId != null ? () => onUploadImage('cover', coverEntityId) : undefined}
+              bookId={bookId}
+              engineRatings={engineRatings}
+              onRatingUpdate={onRatingUpdate}
+            />
           </div>
         )}
       </div>
 
       {/* Approve button */}
       <button
-        onClick={() => onApprove(charSel, locSel)}
+        onClick={() => {
+          const artefactSelections: Record<string, string[]> = {};
+          artefacts.forEach((a) => {
+            const urls = artefactSel[a.id];
+            if (urls?.length) artefactSelections[String(a.id)] = urls;
+          });
+          onApprove(charSel, locSel, Object.keys(artefactSelections).length ? artefactSelections : undefined, coverSel.length ? coverSel : undefined);
+        }}
         disabled={!allReady || loading}
         type="button"
         className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg
@@ -236,7 +321,20 @@ function EntityCard({
 }) {
   const [expandedImage, setExpandedImage] = useState<ReferenceImageItem | null>(null);
   const [lightboxDisplayUrl, setLightboxDisplayUrl] = useState('');
-  const sourceLabel = (src?: string) => (src === 'unsplash' ? 'Unsplash' : src === 'serpapi' ? 'SerpAPI' : src === 'user' ? 'User' : src ?? null);
+  const sourceLabel = (src?: string) => {
+    if (!src) return null;
+    const labels: Record<string, string> = {
+      unsplash: 'Unsplash',
+      serpapi: 'SerpAPI',
+      pexels: 'Pexels',
+      pixabay: 'Pixabay',
+      openverse: 'Openverse',
+      wikimedia: 'Wikimedia',
+      deviantart: 'DeviantArt',
+      user: 'User',
+    };
+    return labels[src.toLowerCase()] ?? src.charAt(0).toUpperCase() + src.slice(1).toLowerCase();
+  };
   const ratingByProvider = (provider: string) => engineRatings.find((r) => r.provider === provider);
 
   function handleRate(source: string | undefined, action: 'like' | 'dislike') {
@@ -400,13 +498,3 @@ function EntityCard({
   );
 }
 
-function Row({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span className="font-ui text-xs text-sepia uppercase tracking-wide w-24 shrink-0">
-        {label}
-      </span>
-      <span className="font-body text-sm text-charcoal">{value ?? '—'}</span>
-    </div>
-  );
-}

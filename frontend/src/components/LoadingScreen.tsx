@@ -17,10 +17,20 @@ const GENERATION_MESSAGES = [
   'Almost there...',
 ];
 
+interface EntityProgressItem {
+  status: string;
+  current: number;
+  total: number;
+}
+
 interface Props {
   mode: 'analysis' | 'generation';
-  /** When set (analysis mode), shows chunk progress bar. */
-  analysisProgress?: { currentChunk: number; totalChunks: number } | null;
+  /** When set (analysis mode), shows chunk progress bar and optional per-entity progress. */
+  analysisProgress?: {
+    currentChunk: number;
+    totalChunks: number;
+    entityProgress?: Record<string, EntityProgressItem>;
+  } | null;
   onCancel?: () => void;
 }
 
@@ -63,27 +73,66 @@ export default function LoadingScreen({ mode, analysisProgress, onCancel }: Prop
         </AnimatePresence>
       </div>
 
-      {/* Progress (analysis only): show indeterminate until we have chunk counts */}
+      {/* Progress (analysis only): overall bar + per-entity progress when available */}
       {mode === 'analysis' && (
-        <div className="w-full max-w-xs space-y-1">
+        <div className="w-full max-w-md space-y-3">
           {analysisProgress && analysisProgress.totalChunks > 0 ? (
             <>
-              <div className="h-2 w-full rounded-full bg-sepia/15 overflow-hidden">
-                <motion.div
-                  className="h-full rounded-full bg-golden"
-                  initial={{ width: 0 }}
-                  animate={{
-                    width: `${Math.min(
-                      100,
-                      (100 * analysisProgress.currentChunk) / analysisProgress.totalChunks,
-                    )}%`,
-                  }}
-                  transition={{ duration: 0.4 }}
-                />
+              <div className="space-y-1">
+                <div className="h-2 w-full rounded-full bg-sepia/15 overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full bg-golden"
+                    initial={{ width: 0 }}
+                    animate={{
+                      width: `${Math.min(
+                        100,
+                        (100 * analysisProgress.currentChunk) / analysisProgress.totalChunks,
+                      )}%`,
+                    }}
+                    transition={{ duration: 0.4 }}
+                  />
+                </div>
+                <p className="font-ui text-xs text-sepia text-center">
+                  Overall: {analysisProgress.currentChunk}% complete
+                </p>
               </div>
-              <p className="font-ui text-xs text-sepia text-center">
-                Chunk {analysisProgress.currentChunk} of {analysisProgress.totalChunks}
-              </p>
+              {analysisProgress.entityProgress && Object.keys(analysisProgress.entityProgress).length > 0 && (
+                <div className="space-y-1.5 rounded-lg border border-sepia/15 bg-white/50 p-3">
+                  <p className="font-ui text-xs font-medium text-charcoal">By entity type</p>
+                  {Object.entries(analysisProgress.entityProgress).map(([entityType, ep]) => {
+                    const label =
+                      entityType === 'characters'
+                        ? 'Characters'
+                        : entityType === 'locations'
+                          ? 'Locations'
+                          : entityType === 'artefacts'
+                            ? 'Artefacts'
+                            : entityType === 'cover'
+                              ? 'Cover'
+                              : entityType;
+                    const isChunkPhase = entityType === 'characters' || entityType === 'locations';
+                    const isStepsPhase = entityType === 'cover' || entityType === 'artefacts';
+                    const status =
+                      ep.status === 'complete'
+                        ? 'Done'
+                        : ep.status === 'running'
+                          ? isChunkPhase
+                            ? `${ep.current}/${ep.total} chunks`
+                            : isStepsPhase
+                              ? `${ep.current}/${ep.total} steps`
+                              : `${ep.current}/${ep.total}`
+                          : 'Pending';
+                    return (
+                      <div key={entityType} className="flex justify-between items-center font-ui text-xs">
+                        <span className="text-charcoal">{label}</span>
+                        <span className={ep.status === 'complete' ? 'text-green-600' : 'text-sepia'}>
+                          {status}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : (
             <>

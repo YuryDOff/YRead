@@ -33,9 +33,11 @@ class UnsplashProvider(BaseImageProvider):
             return []
 
         orientation = "portrait" if content_type == "character" else "landscape"
+        # Unsplash API allows max 30 per request
+        per_page = min(count, 30)
         params = {
             "query": query,
-            "per_page": count,
+            "per_page": per_page,
             "orientation": orientation,
         }
         headers = {"Authorization": f"Client-ID {self.access_key}"}
@@ -56,9 +58,21 @@ class UnsplashProvider(BaseImageProvider):
             return []
 
         results: list[dict] = []
-        for img in data.get("results", [])[:count]:
+        for img in data.get("results", [])[:per_page]:
             urls = img.get("urls", {})
             user = img.get("user", {})
+            desc = img.get("description") or img.get("alt_description") or ""
+            tags_preview = img.get("tags") or img.get("tags_preview") or []
+            tags_str = " ".join(
+                t.get("title", "") if isinstance(t, dict) else str(t)
+                for t in tags_preview[:10]
+            )
+            search_metadata = {
+                "title": (img.get("title") or "").strip(),
+                "description": desc.strip() if desc else "",
+                "alt": (img.get("alt_description") or "").strip(),
+                "tags": tags_str.strip(),
+            }
             results.append({
                 "url": urls.get("regular") or urls.get("full") or "",
                 "thumbnail": urls.get("thumb") or urls.get("small") or "",
@@ -67,5 +81,6 @@ class UnsplashProvider(BaseImageProvider):
                 "credit": user.get("name", "Unsplash") or "Unsplash",
                 "license": "Unsplash License (free for commercial use)",
                 "provider": self.name,
+                "search_metadata": search_metadata,
             })
         return [r for r in results if r["url"]]

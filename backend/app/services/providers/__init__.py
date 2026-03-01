@@ -7,6 +7,8 @@ from app.services.providers.pixabay_provider import PixabayProvider
 from app.services.providers.openverse_provider import OpenverseProvider
 from app.services.providers.wikimedia_provider import WikimediaProvider
 from app.services.providers.deviantart_provider import DeviantArtProvider
+from app.services.providers.behance_provider import BehanceProvider
+from app.services.providers.dribbble_provider import DribbbleProvider
 
 ALL_PROVIDERS: dict[str, BaseImageProvider] = {
     "unsplash": UnsplashProvider(),
@@ -16,6 +18,8 @@ ALL_PROVIDERS: dict[str, BaseImageProvider] = {
     "openverse": OpenverseProvider(),
     "wikimedia": WikimediaProvider(),
     "deviantart": DeviantArtProvider(),
+    "behance": BehanceProvider(),
+    "dribbble": DribbbleProvider(),
 }
 
 __all__ = [
@@ -27,5 +31,7 @@ __all__ = [
     "OpenverseProvider",
     "WikimediaProvider",
     "DeviantArtProvider",
+    "BehanceProvider",
+    "DribbbleProvider",
     "ALL_PROVIDERS",
 ]

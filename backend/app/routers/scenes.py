@@ -28,6 +28,20 @@ def _load_scene_with_relations(db: Session, scene_id: int) -> Optional[Scene]:
     )
 
 
+def _illustration_priority_rank(priority: Optional[str]) -> int:
+    """Higher = more important for display order. high=3, medium=2, low=1, unknown=0."""
+    if not priority:
+        return 0
+    p = priority.strip().lower()
+    if p == "high":
+        return 3
+    if p == "medium":
+        return 2
+    if p == "low":
+        return 1
+    return 0
+
+
 def _load_scenes_with_relations(db: Session, book_id: int) -> list[Scene]:
     return (
         db.query(Scene)
@@ -36,18 +50,33 @@ def _load_scenes_with_relations(db: Session, book_id: int) -> list[Scene]:
             joinedload(Scene.scene_locations).joinedload(SceneLocation.location),
         )
         .filter(Scene.book_id == book_id)
-        .order_by(Scene.chunk_start_index)
         .all()
     )
 
 
 @router.get("/books/{book_id}/scenes", response_model=list[SceneResponse])
-def get_scenes(book_id: int, db: Session = Depends(get_db)):
-    """Get all scenes for a book, ordered by chunk_start_index."""
+def get_scenes(
+    book_id: int,
+    show_all: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Get scenes for a book. Unless show_all=True, returns top scene_display_count by dramatic importance."""
     book = crud.get_book(db, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
-    return _load_scenes_with_relations(db, book_id)
+    scenes = _load_scenes_with_relations(db, book_id)
+    # Sort by dramatic importance: high priority first, then by visual_intensity desc, then by position in book
+    scenes.sort(
+        key=lambda s: (
+            -_illustration_priority_rank(s.illustration_priority),
+            -(s.visual_intensity or 0),
+            s.chunk_start_index or 0,
+        )
+    )
+    if not show_all:
+        limit = getattr(book, "scene_display_count", None) or 10
+        scenes = scenes[:limit]
+    return scenes
 
 
 @router.patch("/books/{book_id}/scenes/{scene_id}", response_model=SceneResponse)
@@ -69,6 +98,10 @@ def patch_scene(
     updates: dict = {}
     if req.title is not None:
         updates["title"] = req.title
+    if req.narrative_summary is not None:
+        updates["narrative_summary"] = req.narrative_summary
+    if req.dramatic_score_avg is not None:
+        updates["dramatic_score_avg"] = req.dramatic_score_avg
     if req.scene_prompt_draft is not None:
         updates["scene_prompt_draft"] = req.scene_prompt_draft
     if req.is_selected is not None:

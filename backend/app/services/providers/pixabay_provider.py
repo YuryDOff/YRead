@@ -49,16 +49,17 @@ class PixabayProvider(BaseImageProvider):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get("https://pixabay.com/api/", params=params)
+                data = resp.json() if resp.status_code == 200 else {}
                 if resp.status_code != 200:
                     logger.error("Pixabay API returned %s for query: %s", resp.status_code, query)
                     return []
-                data = resp.json()
         except Exception as e:
             logger.exception("Pixabay search failed: %s", e)
             return []
 
         results: list[dict] = []
         for hit in data.get("hits", [])[:count]:
+            tags = (hit.get("tags") or "").strip()
             results.append({
                 "url": hit.get("largeImageURL") or hit.get("webformatURL") or "",
                 "thumbnail": hit.get("previewURL") or hit.get("webformatURL") or "",
@@ -67,5 +68,11 @@ class PixabayProvider(BaseImageProvider):
                 "credit": hit.get("user", "Pixabay"),
                 "license": "Pixabay License (free for commercial use)",
                 "provider": self.name,
+                "search_metadata": {
+                    "title": "",
+                    "description": "",
+                    "alt": "",
+                    "tags": tags,
+                },
             })
         return [r for r in results if r["url"]]

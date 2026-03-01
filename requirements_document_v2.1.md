@@ -2,7 +2,7 @@
 ## "StoryForge AI - Illustrated Books Made Easy"
 
 **Version:** 2.1  
-**Date:** February 10, 2026 (updated Feb 19, 2026: Clean DB script; smart visual query algorithm and review-before-search step per plan; updated Feb 21, 2026: Visual Semantic Engine Steps 1–10 implemented; Steps 11–12 (Schemas + Routers + Frontend) implemented)  
+**Date:** February 10, 2026 (updated Feb 19, 2026: Clean DB script; smart visual query algorithm and review-before-search step per plan; updated Feb 21, 2026: Visual Semantic Engine Steps 1–10 implemented; Steps 11–12 (Schemas + Routers + Frontend) implemented; updated Feb 26, 2026: Cover tab on review-search-result fixed — getCoverImages() helper, ReferenceImages.cover type, reference-results returns cover first; VisualBibleReview coverEntityId prop; artefact/cover selections in approve.)  
 **Project Type:** Web Application (SaaS)  
 **Development Approach:** Vibe-coding with Cursor IDE  
 **Primary Market:** Self-Publishing Authors (B2B)  
@@ -717,7 +717,7 @@ def build_search_query(entity_type, entity_name, description, book_info, visual_
 
 - The **Review Search Result** page (`/review-search-result`) is where the user selects and saves reference images for the visual bible. It is separate from the **Visual Bible** step (`/visual-bible`), which is reserved for AI image generation and the final visual bible view. After "Run reference search", the page opens on the **Characters** tab if the user searched for characters or both, and on the **Locations** tab if they searched for locations only, so the first tab matches what was just searched.
 - **Persisted reference pool:** Search results are stored in the `reference_images` table (per entity: character or location). Each new search **appends** new images to the pool (no overwrite); duplicate URLs per entity are not added. A **FIFO cap of 50 images per entity** is enforced (oldest by `created_at` removed when over the limit); images currently selected by the user are never evicted. Each image has a **source**: `unsplash`, `serpapi`, or `user`.
-- **Loading references:** On opening Review Search Result, the frontend calls `GET /api/books/{book_id}/reference-results`, which returns `{ characters: { entityName: images[] }, locations: { entityName: images[] } }` with each image having `url`, `thumbnail`, `width`, `height`, and **source**. If the response is empty, the page falls back to context from the just-completed search.
+- **Loading references:** On opening Review Search Result, the frontend calls `GET /api/books/{book_id}/reference-results`, which returns `{ cover: { cover: images[] }, characters: { entityName: images[] }, locations: { entityName: images[] }, artefacts: { entityName: images[] } }` (cover first to avoid truncation). Each image has `url`, `thumbnail`, `width`, `height`, and **source**. The frontend uses `getCoverImages(refs)` to read the cover array from either `cover.cover` (reference-results) or `cover.images` (search response). If the response is empty, the page falls back to context from the just-completed search.
 - **Multiple selection:** The user can select **multiple** reference images per entity ("Select for visual bible" in the lightbox adds or toggles the image). Selections are saved on **Approve & Continue** via `POST /api/books/{book_id}/visual-bible/approve` with `character_selections` and `location_selections` as maps of entity id → **array of selected URLs**. The backend stores these in `selected_reference_urls` (JSON) and sets `reference_image_url` to the first selected URL for backward compatibility.
 - **Source labels:** Each thumbnail on the page displays the source (Unsplash, SerpAPI, or User). User-uploaded images are supported via **Upload image** / "Add image" per entity (see below).
 - **User reference upload:** `POST /api/books/{book_id}/reference-upload` (multipart: `file`, `entity_type`, `entity_id`) accepts image files (jpeg, png, webp), saves them under `static/reference_uploads/{book_id}/{entity_type}/`, and inserts a row in `reference_images` with `source = "user"`. The uploaded image appears in the same grid and can be selected for the visual bible. FIFO trim applies to the combined pool including user uploads.
@@ -1151,15 +1151,15 @@ Body: {
 Response: Updated character object
 
 GET /api/books/{book_id}/reference-results
-Response: { characters: { entityName: [{ url, thumbnail, width?, height?, source }] }, locations: { ... } }
-  (source: "unsplash" | "serpapi" | "user")
+Response: { cover: { cover: [{ url, thumbnail, width?, height?, source }] }, characters: { entityName: [...] }, locations: { ... }, artefacts: { entityName: [...] } }
+  (source: "unsplash" | "serpapi" | "behance" | "dribbble" | "user" etc.)
 
 POST /api/books/{book_id}/reference-upload
 Body: multipart form (file, entity_type, entity_id)
 Response: { url, thumbnail, source: "user", id }
 
 POST /api/books/{book_id}/visual-bible/approve
-Body: { character_selections: { entityId: [urls] }, location_selections: { entityId: [urls] } }
+Body: { character_selections: { entityId: [urls] }, location_selections: { entityId: [urls] }, artefact_selections?: { artefactName: [urls] }, cover_selections?: [urls] }
 Response: {
   "status": "approved",
   "approved_at": "2026-02-10T15:45:00Z",

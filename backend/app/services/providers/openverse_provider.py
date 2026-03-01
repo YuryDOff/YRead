@@ -4,6 +4,7 @@ import logging
 import httpx
 
 from app.services.providers.base import BaseImageProvider
+from app.services.openverse_auth import get_token
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,16 @@ class OpenverseProvider(BaseImageProvider):
         }
 
         try:
+            headers = {}
+            access_token = get_token()
+            if access_token:
+                headers["Authorization"] = f"Bearer {access_token}"
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(f"{OPENVERSE_API_BASE}/images/", params=params)
+                resp = await client.get(f"{OPENVERSE_API_BASE}/images/", params=params, headers=headers or None)
+                data = resp.json() if resp.status_code == 200 else {}
                 if resp.status_code != 200:
                     logger.error("Openverse API returned %s for query: %s", resp.status_code, query)
                     return []
-                data = resp.json()
         except Exception as e:
             logger.exception("Openverse search failed: %s", e)
             return []

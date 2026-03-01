@@ -9,6 +9,7 @@ load_dotenv()
 
 from app.database import init_db  # noqa: E402
 from app.routers import books, visual_bible, illustrations, webhook, scenes, settings  # noqa: E402
+from app.services.openverse_auth import start_background_refresh  # noqa: E402
 
 app = FastAPI(
     title="StoryForge AI",
@@ -47,6 +48,7 @@ app.include_router(settings.router, prefix="/api", tags=["settings"])
 @app.on_event("startup")
 def on_startup():
     init_db()
+    start_background_refresh()
 
 
 @app.get("/health")

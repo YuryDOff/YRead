@@ -35,6 +35,7 @@ export default function CreateBookPage() {
   const [analysisProgress, setAnalysisProgress] = useState<{
     currentChunk: number;
     totalChunks: number;
+    entityProgress?: Record<string, { status: string; current: number; total: number }>;
   } | null>(null);
 
   function handleUploadSuccess(book: Book, metadata?: BookUploadMetadata) {
@@ -48,12 +49,14 @@ export default function CreateBookPage() {
     setStep('style');
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(formValues?: { sceneCount: number }) {
     if (!ctx.book) return;
     setAnalyzeLoading(true);
     setAnalysisProgress(null);
     setStep('analyzing');
     try {
+      const entityTypes = ctx.entityTypes?.length ? ctx.entityTypes : ['cover', 'characters', 'locations', 'artefacts'];
+      const sceneDisplayCount = formValues?.sceneCount ?? ctx.sceneCount ?? 10;
       await analyzeBook(
         ctx.book.id,
         {
@@ -64,11 +67,14 @@ export default function CreateBookPage() {
           author: ctx.authorName || undefined,
           well_known_book_title: ctx.wellKnownBookTitle || undefined,
           similar_book_title: ctx.similarBookTitle || undefined,
-          scene_count: ctx.sceneCount,
+          scene_display_count: sceneDisplayCount,
+          genre: ctx.genre || undefined,
+          workflow_type: ctx.workflowType || undefined,
+          entity_types: entityTypes,
         },
         {
-          onProgress: (currentChunk, totalChunks) =>
-            setAnalysisProgress({ currentChunk, totalChunks }),
+          onProgress: (currentChunk, totalChunks, entityProgress) =>
+            setAnalysisProgress({ currentChunk, totalChunks, entityProgress }),
         },
       );
 

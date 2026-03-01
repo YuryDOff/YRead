@@ -14,6 +14,11 @@ class BookImportRequest(BaseModel):
     google_drive_link: str
 
 
+class BookUpdateRequest(BaseModel):
+    """Optional fields for PATCH /api/books/{book_id} (e.g. search_query_strategy)."""
+    search_query_strategy: Optional[str] = None
+
+
 class BookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -27,8 +32,30 @@ class BookResponse(BaseModel):
     is_well_known: Optional[int] = 0
     well_known_book_title: Optional[str] = None
     similar_book_title: Optional[str] = None
+    entity_activations: Optional[list[str]] = None
+    genre: Optional[str] = None
+    workflow_type: Optional[str] = None
+    scene_display_count: int = 10
+    target_audience: str = "adult"
+    search_query_strategy: str = "tokens"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deserialize_entity_activations(cls, values):
+        if hasattr(values, "__dict__"):
+            raw = getattr(values, "entity_activations", None)
+            d = dict(values.__dict__)
+            if raw is not None and isinstance(raw, str):
+                try:
+                    d["entity_activations"] = _json.loads(raw) if raw else []
+                except Exception:
+                    d["entity_activations"] = None
+            elif raw is None:
+                d["entity_activations"] = None
+            return d
+        return values
 
 
 class BookAnalyzeRequest(BaseModel):
@@ -39,7 +66,13 @@ class BookAnalyzeRequest(BaseModel):
     author: Optional[str] = None
     well_known_book_title: Optional[str] = None
     similar_book_title: Optional[str] = None
-    scene_count: int = 10  # number of key scenes to extract
+    scene_count: int = 10  # legacy; use scene_display_count for UI
+    scene_display_count: int = 10  # how many scenes to show in UI (extraction uses total_words)
+    target_audience: str = "adult"  # children|ya|adult|literary
+    search_query_strategy: str = "tokens"  # tokens|adaptive
+    entity_types: list[str] = ["cover", "characters", "locations", "artefacts"]
+    genre: str = ""
+    workflow_type: str = "full"  # full | cover_only
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +90,14 @@ class CharacterResponse(BaseModel):
     typical_emotions: Optional[str] = None
     reference_image_url: Optional[str] = None
     is_main: Optional[int] = 0
+    is_selected_for_reference: int = 0
     visual_type: Optional[str] = None
     is_well_known_entity: Optional[int] = 0
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
     ontology: Optional[dict] = None
     entity_visual_tokens: Optional[dict] = None
+    full_description: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -95,6 +130,7 @@ class CharacterUpdate(BaseModel):
     is_well_known_entity: Optional[bool] = None
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
+    full_description: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +147,13 @@ class LocationResponse(BaseModel):
     atmosphere: Optional[str] = None
     reference_image_url: Optional[str] = None
     is_main: Optional[int] = 0
+    is_selected_for_reference: int = 0
     is_well_known_entity: Optional[int] = 0
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
     ontology: Optional[dict] = None
     entity_visual_tokens: Optional[dict] = None
+    full_description: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -145,6 +183,7 @@ class LocationUpdate(BaseModel):
     is_well_known_entity: Optional[bool] = None
     canonical_search_name: Optional[str] = None
     search_visual_analog: Optional[str] = None
+    full_description: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +207,8 @@ class VisualBibleApproveRequest(BaseModel):
     # Each key is entity id (str in JSON); value is list of selected reference URLs
     character_selections: dict[str, list[str]] = {}   # character_id → [urls]
     location_selections: dict[str, list[str]] = {}     # location_id  → [urls]
+    artefact_selections: dict[str, list[str]] = {}     # artefact_id  → [urls]
+    cover_selections: list[str] = []                   # selected cover reference URLs
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +289,13 @@ class SearchReferencesRequest(BaseModel):
     location_summaries: Optional[dict[str, dict]] = None
     # Preferred reference image provider: "unsplash" | "serpapi" (default: try Unsplash first, then SerpAPI)
     preferred_provider: Optional[Literal["unsplash", "serpapi"]] = None
-    # Which entity types to search: "characters" | "locations" | "both" (default: both)
-    search_entity_types: Optional[Literal["characters", "locations", "both"]] = "both"
+    # Which entity types to search: "characters" | "locations" | "both" | "artefacts" | "cover" | "all"
+    search_entity_types: Optional[Literal["characters", "locations", "both", "artefacts", "cover", "all"]] = "both"
     # Optional: restrict search to these provider names (from Settings). If omitted, all available are used.
     enabled_providers: Optional[list[str]] = None
+    # Optional: override queries for artefacts (artefact id -> list of query strings) and cover (list of strings)
+    artefact_queries: Optional[dict[str, list[str]]] = None
+    cover_queries: Optional[list[str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +369,8 @@ class SceneResponse(BaseModel):
 
 class SceneUpdateRequest(BaseModel):
     title: Optional[str] = None
+    narrative_summary: Optional[str] = None
+    dramatic_score_avg: Optional[float] = None
     scene_prompt_draft: Optional[str] = None
     is_selected: Optional[bool] = None
 
@@ -363,9 +409,231 @@ class EntityMainFlag(BaseModel):
 
 
 class EntitySelectionsRequest(BaseModel):
-    """Batch-update is_main flags for characters and locations."""
+    """Batch-update is_main flags for characters, locations, and artefacts."""
     characters: list[EntityMainFlag] = []
     locations: list[EntityMainFlag] = []
+    artefacts: list[EntityMainFlag] = []
+
+
+class EntityActivationsRequest(BaseModel):
+    """Request body for PUT /api/books/{book_id}/entity-activations."""
+    entity_activations: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Artefact (four-entity model)
+# ---------------------------------------------------------------------------
+
+class ArtefactUpdate(BaseModel):
+    """Optional fields for PUT /api/books/{book_id}/artefacts/{id}."""
+    name: Optional[str] = None
+    physical_description: Optional[str] = None
+    symbolic_role: Optional[str] = None
+    narrative_function: Optional[str] = None
+    typical_contexts: Optional[str] = None
+    is_main: Optional[int] = None
+    visual_type: Optional[str] = None
+    full_description: Optional[str] = None
+
+
+class ArtefactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    name: str
+    physical_description: Optional[str] = None
+    symbolic_role: Optional[str] = None
+    narrative_function: Optional[str] = None
+    typical_contexts: Optional[str] = None
+    is_main: Optional[int] = 0
+    visual_type: Optional[str] = None
+    is_well_known_entity: Optional[int] = 0
+    canonical_search_name: Optional[str] = None
+    search_visual_analog: Optional[str] = None
+    text_to_image_prompt: Optional[str] = None
+    reference_image_url: Optional[str] = None
+    selected_reference_urls: Optional[list[str]] = None
+    visual_bible_images: Optional[list[str]] = None
+    visual_bible_depth: Optional[int] = None
+    full_description: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deserialize_json_fields(cls, values):
+        if hasattr(values, "__dict__"):
+            d = dict(values.__dict__)
+            for key, attr in (("selected_reference_urls", "selected_reference_urls"), ("visual_bible_images", "visual_bible_images")):
+                raw = getattr(values, attr, None)
+                if raw is not None and isinstance(raw, str):
+                    try:
+                        d[key] = _json.loads(raw) if raw else []
+                    except Exception:
+                        d[key] = None
+            return d
+        return values
+
+
+# ---------------------------------------------------------------------------
+# Cover Analysis
+# ---------------------------------------------------------------------------
+
+class CoverAnalysisResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    thematic_statement: Optional[str] = None
+    emotional_promise: Optional[str] = None
+    dominant_motifs: Optional[list[str]] = None
+    symbolic_anchors: Optional[list[str]] = None
+    cover_mood_keywords: Optional[list[str]] = None
+    genre_conventions: Optional[str] = None
+    genre_subversion_opportunity: Optional[str] = None
+    typography_direction: Optional[str] = None
+    color_palette_direction: Optional[dict] = None
+    cover_t2i_prompt: Optional[str] = None
+    cover_negative_prompt: Optional[str] = None
+    cover_role_character_ids: Optional[list[int]] = None
+    cover_role_location_ids: Optional[list[int]] = None
+    cover_role_artefact_ids: Optional[list[int]] = None
+    cover_type: Optional[str] = None
+    color_palette_structured: Optional[dict] = None
+    primary_cover_character_id: Optional[int] = None
+    primary_cover_location_id: Optional[int] = None
+    primary_cover_artefact_id: Optional[int] = None
+    full_description: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deserialize_json_fields(cls, values):
+        if hasattr(values, "__dict__"):
+            d = dict(values.__dict__)
+            for key, attr in (
+                ("dominant_motifs", "dominant_motifs"),
+                ("symbolic_anchors", "symbolic_anchors"),
+                ("cover_mood_keywords", "cover_mood_keywords"),
+                ("color_palette_direction", "color_palette_direction"),
+                ("cover_role_character_ids", "cover_role_character_ids"),
+                ("cover_role_location_ids", "cover_role_location_ids"),
+                ("cover_role_artefact_ids", "cover_role_artefact_ids"),
+                ("color_palette_structured", "color_palette_structured"),
+            ):
+                raw = getattr(values, attr, None)
+                if raw is not None and isinstance(raw, str):
+                    try:
+                        d[key] = _json.loads(raw) if raw else None
+                    except Exception:
+                        d[key] = None
+            return d
+        return values
+
+
+class CoverAnalysisUpdateRequest(BaseModel):
+    """All fields optional for user edits."""
+    thematic_statement: Optional[str] = None
+    emotional_promise: Optional[str] = None
+    dominant_motifs: Optional[list[str]] = None
+    symbolic_anchors: Optional[list[str]] = None
+    cover_mood_keywords: Optional[list[str]] = None
+    genre_conventions: Optional[str] = None
+    genre_subversion_opportunity: Optional[str] = None
+    typography_direction: Optional[str] = None
+    color_palette_direction: Optional[dict] = None
+    cover_t2i_prompt: Optional[str] = None
+    cover_negative_prompt: Optional[str] = None
+    cover_role_character_ids: Optional[list[int]] = None
+    cover_role_location_ids: Optional[list[int]] = None
+    cover_role_artefact_ids: Optional[list[int]] = None
+    cover_type: Optional[str] = None
+    color_palette_structured: Optional[dict] = None
+    primary_cover_character_id: Optional[int] = None
+    primary_cover_location_id: Optional[int] = None
+    primary_cover_artefact_id: Optional[int] = None
+    full_description: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Visual Bible Entry
+# ---------------------------------------------------------------------------
+
+class VisualBibleEntryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    entity_type: str
+    entity_id: int
+    angle_label: Optional[str] = None
+    prompt_used: Optional[str] = None
+    image_path: Optional[str] = None
+    status: str = "pending"
+    is_approved: Optional[int] = 0
+    created_at: Optional[datetime] = None
+
+
+class VisualBibleEntryGenerateRequest(BaseModel):
+    entity_type: str  # character|location|artefact
+    entity_id: int
+    angle_label: Optional[str] = None
+    prompt: Optional[str] = None
+
+
+class VisualBibleEntryGenerateAllRequest(BaseModel):
+    entity_type: Optional[str] = None  # if set, only this type
+
+
+class VisualBibleEntryPatchRequest(BaseModel):
+    is_approved: Optional[int] = None
+    image_path: Optional[str] = None
+    status: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Cover Concept
+# ---------------------------------------------------------------------------
+
+class CoverConceptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    concept_index: int
+    prompt_used: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    style_variant: Optional[str] = None
+    image_path: Optional[str] = None
+    status: str = "pending"
+    is_selected: Optional[int] = 0
+    created_at: Optional[datetime] = None
+
+
+class CoverConceptGenerateRequest(BaseModel):
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    style_variant: Optional[str] = None  # photographic|illustrated|abstract|typographic
+    concept_count: int = 3
+
+
+class CoverConceptPatchRequest(BaseModel):
+    is_selected: Optional[int] = None
+    prompt_used: Optional[str] = None
+    style_variant: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Analysis progress (replaces simple dict)
+# ---------------------------------------------------------------------------
+
+class AnalysisProgressItem(BaseModel):
+    entity_type: str
+    status: Literal["pending", "running", "complete", "failed"]
+
+
+class AnalysisProgressResponse(BaseModel):
+    progress: list[AnalysisProgressItem] = []
 
 
 # ---------------------------------------------------------------------------
@@ -380,3 +648,8 @@ class StatusResponse(BaseModel):
 class AnalyzeStatusResponse(BaseModel):
     status: str
     estimated_time: Optional[int] = None  # seconds
+
+
+class AnalyzeEntityRequest(BaseModel):
+    """Request body for POST /api/books/{book_id}/analyze/entity."""
+    entity_type: str  # "characters" | "locations" | "artefacts" | "cover"

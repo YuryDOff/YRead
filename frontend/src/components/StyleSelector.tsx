@@ -24,8 +24,28 @@ const FREQ_OPTIONS = [
   { value: 12, label: 'Every 12 pages' },
 ];
 
+const GENRE_OPTIONS = [
+  { value: '', label: '— Select genre —' },
+  { value: 'fiction', label: 'Fiction' },
+  { value: 'fantasy', label: 'Fantasy' },
+  { value: 'sci_fi', label: 'Sci-Fi' },
+  { value: 'romance', label: 'Romance' },
+  { value: 'thriller', label: 'Thriller' },
+  { value: 'non_fiction', label: 'Non-Fiction' },
+  { value: 'fairy_tale', label: "Children's / Fairy tale" },
+  { value: 'classic', label: 'Classic / Literary' },
+];
+
+const ENTITY_TYPE_OPTIONS = [
+  { id: 'cover', label: 'Cover' },
+  { id: 'characters', label: 'Characters' },
+  { id: 'locations', label: 'Locations' },
+  { id: 'artefacts', label: 'Artefacts' },
+];
+
 interface Props {
-  onSubmit: () => void;
+  /** Called with current form values so parent can use them in the same tick (avoids context race). */
+  onSubmit: (formValues?: { sceneCount: number }) => void;
   loading?: boolean;
 }
 
@@ -43,6 +63,9 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
   const [similarBookTitle, setSimilarBookTitle] = useState(ctx.similarBookTitle);
   const [mainOnly, setMainOnly] = useState(ctx.mainOnlyReferences);
   const [sceneCount, setSceneCount] = useState(ctx.sceneCount);
+  const [genre, setGenre] = useState(ctx.genre);
+  const [workflowType, setWorkflowType] = useState(ctx.workflowType);
+  const [entityTypes, setEntityTypes] = useState<string[]>(ctx.entityTypes);
 
   // Sync from context when VB loads (e.g. opening existing book)
   useEffect(() => {
@@ -57,8 +80,11 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
       setSimilarBookTitle(ctx.similarBookTitle);
       setMainOnly(ctx.mainOnlyReferences);
       setSceneCount(ctx.sceneCount);
+      setGenre(ctx.genre);
+      setWorkflowType(ctx.workflowType);
+      setEntityTypes(ctx.entityTypes);
     }
-  }, [ctx.book?.id, ctx.styleCategory, ctx.illustrationFrequency, ctx.layoutStyle, ctx.isWellKnown, ctx.authorName, ctx.wellKnownBookTitle, ctx.similarBookTitle, ctx.mainOnlyReferences, ctx.sceneCount]);
+  }, [ctx.book?.id, ctx.styleCategory, ctx.illustrationFrequency, ctx.layoutStyle, ctx.isWellKnown, ctx.authorName, ctx.wellKnownBookTitle, ctx.similarBookTitle, ctx.mainOnlyReferences, ctx.sceneCount, ctx.genre, ctx.workflowType, ctx.entityTypes]);
 
   const totalIllustrations = Math.max(1, Math.ceil(totalPages / freq));
 
@@ -72,7 +98,16 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
     ctx.setSimilarBookTitle(hasSimilarBook ? similarBookTitle : '');
     ctx.setMainOnlyReferences(mainOnly);
     ctx.setSceneCount(sceneCount);
-    onSubmit();
+    ctx.setGenre(genre);
+    ctx.setWorkflowType(workflowType);
+    ctx.setEntityTypes(entityTypes);
+    onSubmit({ sceneCount });
+  }
+
+  function toggleEntityType(id: string) {
+    setEntityTypes((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
   }
 
   return (
@@ -162,6 +197,66 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
         </div>
       </section>
 
+      {/* Genre & workflow */}
+      <section className="space-y-3 p-4 rounded-xl bg-white/50 border border-sepia/15">
+        <h3 className="font-display text-lg font-semibold text-charcoal">Genre & workflow</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className="block font-ui text-xs text-sepia">Genre</label>
+            <select
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-sepia/25 bg-white/70 font-ui text-sm focus:outline-none focus:ring-2 focus:ring-golden/40"
+            >
+              {GENRE_OPTIONS.map((opt) => (
+                <option key={opt.value || 'empty'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="block font-ui text-xs text-sepia">Workflow</label>
+            <div className="flex gap-3">
+              {[
+                { id: 'full', label: 'Full book' },
+                { id: 'cover_only', label: 'Cover only' },
+              ].map((opt) => (
+                <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="workflow"
+                    checked={workflowType === opt.id}
+                    onChange={() => setWorkflowType(opt.id)}
+                    className="w-4 h-4 accent-golden"
+                  />
+                  <span className="font-ui text-sm text-charcoal">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <label className="block font-ui text-xs text-sepia">Analyze (entity types)</label>
+          <div className="flex flex-wrap gap-3">
+            {ENTITY_TYPE_OPTIONS.map((opt) => (
+              <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={entityTypes.includes(opt.id)}
+                  onChange={() => toggleEntityType(opt.id)}
+                  className="w-4 h-4 accent-golden"
+                />
+                <span className="font-ui text-sm text-charcoal">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-sepia/70 font-ui">
+            At least one type must be selected. Full book usually uses all four.
+          </p>
+        </div>
+      </section>
+
       {/* Visual style */}
       <section className="space-y-3">
         <h3 className="font-display text-lg font-semibold text-charcoal">Visual Style</h3>
@@ -234,21 +329,21 @@ export default function StyleSelector({ onSubmit, loading }: Props) {
         </div>
       </section>
 
-      {/* Scene count */}
+      {/* Scenes to display */}
       <section className="space-y-3">
-        <h3 className="font-display text-lg font-semibold text-charcoal">Key Scenes to Extract</h3>
+        <h3 className="font-display text-lg font-semibold text-charcoal">Scenes to display</h3>
         <div className="flex items-center gap-4">
           <input
             type="number"
             min={3}
-            max={20}
+            max={30}
             value={sceneCount}
-            onChange={(e) => setSceneCount(Math.min(20, Math.max(3, Number(e.target.value))))}
+            onChange={(e) => setSceneCount(Math.min(30, Math.max(3, Number(e.target.value))))}
             className="w-24 px-3 py-2 rounded-lg border border-sepia/20 bg-white font-ui text-sm
                        text-charcoal focus:outline-none focus:ring-2 focus:ring-golden/40"
           />
           <p className="text-sm font-ui text-sepia">
-            scenes (3–20) — key narrative moments to illustrate
+            (3–30) — how many key scenes to show in the UI. Extraction is automatic based on book length.
           </p>
         </div>
       </section>

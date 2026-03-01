@@ -428,6 +428,11 @@ def _build_entity_token_fallbacks(entities: list[dict]) -> list[dict]:
     return [_entity_token_fallback(e) for e in entities]
 
 
+# Consolidation output limits. Only this many characters/locations are extracted; re-runs can pick
+# different secondary characters due to model non-determinism.
+MAX_MAIN_CHARACTERS = 5
+MAX_MAIN_LOCATIONS = 5
+
 CONSOLIDATION_PROMPT = """\
 Given these character and location extractions from multiple sections of a book, consolidate into:
 
@@ -436,7 +441,7 @@ LANGUAGE RULES (mandatory):
 - Keep "name" in the ORIGINAL language as in the manuscript (e.g. Russian names stay in Russian).
 - For EVERY character and location set "canonical_search_name" in ENGLISH: for well-known entities use the standard English name (e.g. "Napoleon", "Sherlock Holmes", "Easter Island"); for others use English transliteration or translation of the name (e.g. "Ivan" → "Ivan", "Москва" → "Moscow") so that image search and APIs can use it. Never leave canonical_search_name null — always provide an English form.
 
-1. Top 5 MAIN CHARACTERS (most frequently mentioned, most important to plot)
+1. Top 5 MAIN CHARACTERS (most frequently mentioned, most important to plot; pick consistently by mention frequency to reduce variance between re-runs)
    - Merge duplicate descriptions into comprehensive profiles
    - Create detailed physical descriptions (in English)
    - Identify 2 most characteristic emotions for each
@@ -623,7 +628,7 @@ BATCH_SIZE = 10  # chunks per GPT call; fewer round-trips = faster total analysi
 def run_full_analysis(
     chunks: list[dict],
     progress_callback: Optional[Callable[[int, int], None]] = None,
-    scene_count: int = 10,
+    total_words: int = 0,
     is_well_known_book: bool = False,
     analysis_run_id: Optional[str] = None,
 ) -> dict:
@@ -834,15 +839,15 @@ def run_full_analysis(
         except Exception:
             pass
     t_scenes = time.perf_counter()
-    logger.info("[analyze] Extracting scenes (scene_count=%d)...", scene_count)
+    logger.info("[analyze] Extracting scenes (total_words=%d)...", total_words)
 
     scenes: list[dict] = []
-    if scene_count > 0 and all_chunk_analyses:
+    if all_chunk_analyses:
         try:
             from app.services.scene_extractor import extract_scenes
             scenes = extract_scenes(
                 all_chunk_analyses,
-                scene_count=scene_count,
+                total_words=total_words,
                 chunk_text_map=chunk_text_map,
                 manuscript_lang=manuscript_lang,
                 analysis_run_id=run_id,

@@ -23,6 +23,51 @@ logger = logging.getLogger(__name__)
 CHARACTER_PLACEHOLDER = "/static/placeholders/character.svg"
 LOCATION_PLACEHOLDER = "/static/placeholders/location.svg"
 
+# Max length for a single search query (many APIs truncate or behave poorly beyond ~200 chars)
+MAX_QUERY_LENGTH = 200
+
+# Max reference images returned per entity (character or location) in one search run
+MAX_REFERENCE_IMAGES_PER_ENTITY = 50
+
+# Provider category for adaptive query strategy (Phase 7.5)
+PROVIDER_CATEGORY = {
+    "serpapi": "google_semantic",
+    "behance": "google_semantic",
+    "dribbble": "google_semantic",
+    "unsplash": "tag_based",
+    "pexels": "tag_based",
+    "pixabay": "tag_based",
+    "openverse": "tag_based",
+    "wikimedia": "catalogue",
+    "flickr": "hybrid",
+}
+
+
+def build_search_query(
+    entity_name: str,
+    visual_tokens: str,
+    full_description: Optional[str],
+    provider: str,
+    strategy: str,
+) -> str:
+    """
+    Return the search string to use for the given provider.
+    If strategy == "tokens", always return visual_tokens (legacy).
+    If strategy == "adaptive", route by provider category.
+    """
+    if strategy == "tokens" or not full_description:
+        return visual_tokens
+    category = PROVIDER_CATEGORY.get(provider, "tag_based")
+    if category == "google_semantic":
+        return full_description
+    if category == "catalogue":
+        return entity_name
+    if category == "hybrid":
+        tokens = (visual_tokens or "").split()[:3]
+        return f"{entity_name} {' '.join(tokens)}".strip()
+    return visual_tokens
+
+
 # ---------------------------------------------------------------------------
 # Resolve entity chunks & visual tokens
 # ---------------------------------------------------------------------------
@@ -95,6 +140,25 @@ def _get_visual_tokens_for_entity(
     }
 
 
+def _get_visual_tokens_for_artefact(db: Session, artefact_id: int) -> dict:
+    """Return visual tokens for an artefact from entity_visual_tokens_json."""
+    artefact = crud.get_artefact(db, artefact_id)
+    if not artefact or not getattr(artefact, "entity_visual_tokens_json", None):
+        return {"core_tokens": [], "style_tokens": [], "archetype_tokens": [], "anti_tokens": []}
+    try:
+        tokens = _json.loads(artefact.entity_visual_tokens_json)
+        if isinstance(tokens, dict):
+            return {
+                "core_tokens": tokens.get("core_tokens") or [],
+                "style_tokens": tokens.get("style_tokens") or [],
+                "archetype_tokens": tokens.get("archetype_tokens") or [],
+                "anti_tokens": tokens.get("anti_tokens") or [],
+            }
+    except (ValueError, TypeError):
+        pass
+    return {"core_tokens": [], "style_tokens": [], "archetype_tokens": [], "anti_tokens": []}
+
+
 # ---------------------------------------------------------------------------
 # Query construction
 # ---------------------------------------------------------------------------
@@ -154,9 +218,9 @@ def _build_queries(
     # Descriptive query: prefer search_visual_analog for fictional, else tokens, else description
     analog = (search_visual_analog or "").strip()
     if analog:
-        parts = analog[:120].split()
-        base = " ".join(parts[:12]) if len(parts) > 12 else analog[:120]
-        queries.append(f"{base}{suffix}".strip())
+        parts = analog[:MAX_QUERY_LENGTH].split()
+        base = " ".join(parts[:20])[:MAX_QUERY_LENGTH]
+        queries.append(f"{base}{suffix}".strip()[:MAX_QUERY_LENGTH])
     elif core or style:
         parts = list(core[:4]) + list(style[:2])
         queries.append(f"{' '.join(parts)}{suffix}".strip())
@@ -265,9 +329,9 @@ def _build_queries_diversified(
     analog = (search_visual_analog or "").strip()
     canonical = (canonical_search_name or "").strip()
     if analog:
-        _add(f"{analog[:100]}{human_suffix}".strip())
+        _add(f"{analog[:100]}{human_suffix}".strip()[:MAX_QUERY_LENGTH])
     elif canonical and is_well_known_entity:
-        _add(f"{canonical} {entity_class} illustration".strip())
+        _add(f"{canonical} {entity_class} illustration".strip()[:MAX_QUERY_LENGTH])
 
     # Q4: Core tokens + archetype tokens
     if core_tokens or archetype_tokens:
@@ -305,6 +369,81 @@ def _build_queries_diversified(
     return queries[:6]  # cap at 6
 
 
+def _build_queries_artefact(
+    description: str,
+    book_info: dict,
+    entity_visual_tokens: dict,
+    ontology: dict,
+    *,
+    name: Optional[str] = None,
+) -> list[str]:
+    """Build 2–5 search queries for an artefact from tokens and description."""
+    style_category = (book_info.get("style_category") or "fiction").strip()
+    core_tokens = entity_visual_tokens.get("core_tokens") or []
+    style_tokens = entity_visual_tokens.get("style_tokens") or []
+    archetype_tokens = entity_visual_tokens.get("archetype_tokens") or []
+    search_archetype = (ontology.get("search_archetype") or "").strip()
+    suffix = " object"
+
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def _add(q: str) -> None:
+        q = (q or "").strip()
+        if q and q not in seen:
+            seen.add(q)
+            queries.append(q[:MAX_QUERY_LENGTH])
+
+    if description:
+        _add(f"{description[:80].strip()}{suffix}")
+    if name:
+        _add(f"{name}{suffix} {style_category}")
+    if core_tokens or style_tokens:
+        parts = list(core_tokens[:3]) + list(style_tokens[:2])
+        if parts:
+            _add(f"{' '.join(parts)}{suffix} {style_category}")
+    if search_archetype:
+        _add(f"{search_archetype}{suffix} {style_category}")
+    if archetype_tokens:
+        _add(f"{' '.join(archetype_tokens[:2])}{suffix} {style_category}")
+    if len(queries) < 2 and description:
+        _add(f"{description[:60].strip()}{suffix} {style_category}")
+
+    return queries[:6]
+
+
+def _build_cover_queries(
+    symbolic_anchors: list[str],
+    cover_mood_keywords: list[str],
+    style_category: str,
+    genre: str = "",
+) -> list[str]:
+    """Build 3–6 search queries for cover from symbolic_anchors + mood + genre."""
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def _add(q: str) -> None:
+        q = (q or "").strip()
+        if q and q not in seen:
+            seen.add(q)
+            queries.append(q[:MAX_QUERY_LENGTH])
+
+    for anchor in (symbolic_anchors or [])[:2]:
+        if anchor:
+            _add(f"{anchor} book cover")
+    mood_str = " ".join((cover_mood_keywords or [])[:4])
+    if mood_str:
+        _add(f"{mood_str} book cover")
+    if style_category:
+        _add(f"{style_category} book cover design")
+    if genre:
+        _add(f"{genre} book cover illustration")
+    if len(queries) < 2 and symbolic_anchors:
+        _add(f"{symbolic_anchors[0]} cover art")
+
+    return queries[:6]
+
+
 def _is_adaptation_query(query: str, known_adaptations: list[str]) -> bool:
     """Return True if the query is an adaptation-specific film/TV still query."""
     q_lower = query.lower()
@@ -318,7 +457,43 @@ def _is_adaptation_query(query: str, known_adaptations: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Deduplicate & filter
+# Alignment score (query vs image metadata for ranking)
+# ---------------------------------------------------------------------------
+
+
+def _alignment_score(query_text: str, img: dict) -> float:
+    """
+    Score 0..1: how well image metadata aligns with the search query.
+    Uses token overlap (F1-like). If no metadata, returns neutral 0.5.
+    """
+    meta = img.get("search_metadata")
+    if not meta or not isinstance(meta, dict):
+        return 0.5
+    parts = [
+        (meta.get("title") or "").strip(),
+        (meta.get("description") or "").strip(),
+        (meta.get("alt") or "").strip(),
+        (meta.get("tags") or "").strip(),
+    ]
+    meta_text = " ".join(p for p in parts if p).lower()
+    if not meta_text.strip():
+        return 0.5
+    query_tokens = set((query_text or "").lower().split())
+    meta_tokens = set(meta_text.split())
+    if not query_tokens:
+        return 0.5
+    intersection = len(query_tokens & meta_tokens)
+    if not intersection:
+        return 0.2
+    precision = intersection / len(query_tokens)
+    recall = intersection / len(meta_tokens) if meta_tokens else 0
+    if precision + recall == 0:
+        return 0.5
+    return 2 * precision * recall / (precision + recall)
+
+
+# ---------------------------------------------------------------------------
+# Deduplicate, filter and rank
 # ---------------------------------------------------------------------------
 
 
@@ -359,6 +534,39 @@ def _filter_and_dedupe(
             break
 
     return filtered
+
+
+def _filter_dedupe_and_rank(
+    images: list[dict],
+    min_size: int = 512,
+    max_results: int = MAX_REFERENCE_IMAGES_PER_ENTITY,
+) -> list[dict]:
+    """
+    Dedupe by URL (keep entry with highest alignment score), filter by min_size,
+    sort by relevance score descending, return top max_results.
+    Each image should have query_text set (used for alignment score).
+    """
+    if not images:
+        return []
+    # Compute score for each
+    scored: list[tuple[float, dict]] = []
+    for img in images:
+        q = (img.get("query_text") or "").strip()
+        score = _alignment_score(q, img)
+        scored.append((score, {**img, "relevance_score": round(score, 3)}))
+    # Dedupe by URL: keep max score per URL
+    by_url: dict[str, tuple[float, dict]] = {}
+    for score, img in scored:
+        url = img.get("url", "")
+        if not url:
+            continue
+        if url not in by_url or by_url[url][0] < score:
+            by_url[url] = (score, img)
+    # Filter by size
+    filtered = [img for _, img in by_url.values() if (img.get("width") or 0) >= min_size or (img.get("height") or 0) >= min_size]
+    # Sort by score desc
+    filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+    return filtered[:max_results]
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +626,7 @@ def get_proposed_search_queries(
     """
     book = crud.get_book(db, book_id)
     if not book:
-        return {"characters": [], "locations": []}
+        return {"characters": [], "locations": [], "artefacts": [], "cover": None}
 
     vb = crud.get_visual_bible(db, book_id)
     style_category = (vb.style_category if vb and vb.style_category else None) or "fiction"
@@ -552,7 +760,65 @@ def get_proposed_search_queries(
             "is_selected": bool(getattr(scene, "is_selected", 1)),
         })
 
-    return {"characters": char_list, "locations": loc_list, "scenes": scene_list}
+    # Artefacts: proposed queries per main (or all) artefact
+    artefacts = crud.get_artefacts_by_book(db, book_id)
+    if main_only:
+        artefacts = [a for a in artefacts if a.is_main]
+    artefact_list: list[dict] = []
+    for a in artefacts:
+        desc = a.physical_description or ""
+        visual_tokens = _get_visual_tokens_for_artefact(db, a.id)
+        ontology = {}
+        if getattr(a, "ontology_json", None):
+            try:
+                ontology = _json.loads(a.ontology_json) or {}
+            except (ValueError, TypeError):
+                ontology = {}
+        queries = _build_queries_artefact(
+            desc, book_info, visual_tokens, ontology, name=a.name
+        )
+        artefact_list.append({
+            "id": a.id,
+            "name": a.name,
+            "summary": desc or "",
+            "proposed_queries": queries,
+        })
+
+    # Cover: single object with proposed_queries and cover_analysis_summary
+    cover_obj: Optional[dict] = None
+    cover_analysis = crud.get_cover_analysis(db, book_id)
+    if cover_analysis:
+        anchors = []
+        if getattr(cover_analysis, "symbolic_anchors", None):
+            try:
+                anchors = _json.loads(cover_analysis.symbolic_anchors) if isinstance(cover_analysis.symbolic_anchors, str) else (cover_analysis.symbolic_anchors or [])
+            except (ValueError, TypeError):
+                pass
+        mood_kw = []
+        if getattr(cover_analysis, "cover_mood_keywords", None):
+            try:
+                mood_kw = _json.loads(cover_analysis.cover_mood_keywords) if isinstance(cover_analysis.cover_mood_keywords, str) else (cover_analysis.cover_mood_keywords or [])
+            except (ValueError, TypeError):
+                pass
+        genre = getattr(book, "genre", None) or ""
+        proposed_cover = _build_cover_queries(
+            anchors, mood_kw, style_category, genre
+        )
+        cover_obj = {
+            "proposed_queries": proposed_cover,
+            "cover_analysis_summary": (cover_analysis.thematic_statement or ""),
+        }
+    else:
+        # No cover analysis yet: still return one editable slot so user can type a query
+        cover_obj = {"proposed_queries": [""], "cover_analysis_summary": ""}
+
+    return {
+        "characters": char_list,
+        "locations": loc_list,
+        "scenes": scene_list,
+        "artefacts": artefact_list,
+        "cover": cover_obj,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +836,7 @@ async def _search_with_providers(
     serpapi: "SerpApiProvider | None" = None,
 ) -> tuple[list[dict], str]:
     """
-    Search using the given list of provider instances.
+    Search using the given list of provider instances (first successful wins).
     If force_serpapi=True, route to SerpAPI regardless of provider list.
     Returns (results, used_provider_name).
     """
@@ -596,6 +862,46 @@ async def _search_with_providers(
     return [], "unknown"
 
 
+async def _search_all_providers(
+    query: str,
+    content_type: str,
+    providers: list,
+    count_per_provider: int = 30,
+    *,
+    force_serpapi: bool = False,
+    serpapi: "SerpApiProvider | None" = None,
+) -> list[dict]:
+    """
+    Call all available providers for this query and aggregate results.
+    Each result dict gets query_text=query. Used for multi-provider aggregation.
+    """
+    all_results: list[dict] = []
+    if force_serpapi and serpapi and serpapi.is_available():
+        try:
+            results = await serpapi.search(query, content_type, count=count_per_provider)
+            for r in results:
+                r["query_text"] = query
+            all_results.extend(results)
+        except Exception as e:
+            logger.exception("SerpAPI (forced) search failed: %s", e)
+
+    for provider in providers:
+        if not provider.is_available():
+            continue
+        if force_serpapi and getattr(provider, "name", "") == "serpapi":
+            continue
+        try:
+            formatted_query = provider.format_query(query)
+            results = await provider.search(formatted_query, content_type, count=count_per_provider)
+            for r in results:
+                r["query_text"] = query
+            all_results.extend(results)
+        except Exception as e:
+            logger.exception("%s search failed: %s", provider.name, e)
+
+    return all_results
+
+
 async def search_references_for_book(
     book_id: int,
     search_all: bool = False,
@@ -606,8 +912,10 @@ async def search_references_for_book(
     character_summaries: Optional[dict[int, dict]] = None,
     location_summaries: Optional[dict[int, dict]] = None,
     preferred_provider: Optional[str] = None,
-    search_entity_types: Literal["characters", "locations", "both"] = "both",
+    search_entity_types: Literal["characters", "locations", "both", "artefacts", "cover", "all"] = "both",
     enabled_providers: Optional[list[str]] = None,
+    artefact_queries: Optional[dict[int, list[str]]] = None,
+    cover_queries: Optional[list[str]] = None,
 ) -> dict:
     """
     Search reference images for book entities.
@@ -616,11 +924,7 @@ async def search_references_for_book(
     When character_summaries/location_summaries are provided, update DB before search.
 
     Returns:
-        {
-            book_id, mode, characters: [{id, name, is_main, images, placeholder_assigned}],
-            locations: [...],
-            queries_run, provider_usage: {unsplash, serpapi}
-        }
+        book_id, mode, characters, locations, artefacts?, cover?, queries_run, provider_usage
     """
     if character_summaries and db:
         for cid, data in character_summaries.items():
@@ -631,7 +935,7 @@ async def search_references_for_book(
 
     book = crud.get_book(db, book_id)
     if not book:
-        return {"book_id": book_id, "mode": "main_only", "characters": [], "locations": [], "queries_run": 0, "provider_usage": {}}
+        return {"book_id": book_id, "mode": "main_only", "characters": [], "locations": [], "artefacts": [], "cover": None, "queries_run": 0, "provider_usage": {}}
 
     # Re-fetch so we have updated descriptions if summaries were applied
     characters = crud.get_characters_by_book(db, book_id)
@@ -684,11 +988,20 @@ async def search_references_for_book(
             engine_ratings = {}
 
     serpapi_instance = ALL_PROVIDERS.get("serpapi")
+    # If user passed enabled_providers and preferred_provider is not in that list, ignore preferred_provider
+    # so we use only the enabled set (aggregate mode) instead of forcing the excluded provider
+    effective_preferred = preferred_provider
+    if enabled_providers is not None and len(enabled_providers) > 0 and preferred_provider and preferred_provider not in available_provider_names:
+        effective_preferred = None
+    use_aggregate_providers = not effective_preferred or effective_preferred == "auto"
+    all_enabled_provider_instances = [ALL_PROVIDERS[n] for n in available_provider_names if n in ALL_PROVIDERS]
 
     queries_run = 0
     provider_usage: dict[str, int] = {name: 0 for name in ALL_PROVIDERS}
-    search_characters = search_entity_types in ("both", "characters")
-    search_locations = search_entity_types in ("both", "locations")
+    search_characters = search_entity_types in ("both", "all", "characters")
+    search_locations = search_entity_types in ("both", "all", "locations")
+    search_artefacts = search_entity_types in ("all", "artefacts")
+    search_cover = search_entity_types in ("all", "cover")
 
     def _get_queries_for_entity(entity, entity_type: str, user_overrides: dict) -> list[str]:
         if entity.id in user_overrides:
@@ -719,51 +1032,68 @@ async def search_references_for_book(
         return queries
 
     def _get_providers_for_entity(entity, entity_type: str) -> list:
-        """Select engine instances for this entity using engine_selector."""
-        if preferred_provider and preferred_provider != "auto":
-            p = ALL_PROVIDERS.get(preferred_provider)
-            return [p] if p else []
-
-        ontology = {}
-        if getattr(entity, "ontology_json", None):
-            try:
-                ontology = _json.loads(entity.ontology_json) or {}
-            except (ValueError, TypeError):
-                ontology = {}
-        entity_class = ontology.get("entity_class", "human" if entity_type == "character" else "location")
-        provider_names = select_engines(
-            entity_class=entity_class,
-            entity_type=entity_type,
-            style_category=style_category,
-            available_providers=available_provider_names,
-            engine_ratings=engine_ratings,
-            top_n=2,
-        )
-        return [ALL_PROVIDERS[name] for name in provider_names if name in ALL_PROVIDERS]
+        """Select engine instances: single preferred provider or all enabled (aggregate mode)."""
+        if effective_preferred and effective_preferred != "auto":
+            p = ALL_PROVIDERS.get(effective_preferred)
+            return [p] if p and p.is_available() else []
+        return all_enabled_provider_instances
 
     async def _search_entity(entity, entity_type: str, user_overrides: dict) -> tuple[dict, int]:
         queries = _get_queries_for_entity(entity, entity_type, user_overrides)
         providers = _get_providers_for_entity(entity, entity_type)
+        if not providers:
+            return {
+                "id": entity.id,
+                "name": entity.name,
+                "is_main": bool(entity.is_main),
+                "images": [],
+                "placeholder_assigned": False,
+            }, 0
 
         all_images: list[dict] = []
         entity_name = entity.name
         local_queries_run = 0
+        count_per_provider = 30
 
         for q in queries:
-            # Adaptation queries always go through SerpAPI
             force_serpapi = _is_adaptation_query(q, known_adaptations)
-            results, used_provider = await _search_with_providers(
-                q, entity_type, providers,
-                force_serpapi=force_serpapi,
-                serpapi=serpapi_instance,
-            )
-            if results:
-                local_queries_run += 1
-                provider_usage[used_provider] = provider_usage.get(used_provider, 0) + 1
-                _save_query(db, book_id, entity_type, entity_name, q, len(results), used_provider)
+            if use_aggregate_providers:
+                results = await _search_all_providers(
+                    q, entity_type, providers,
+                    count_per_provider=count_per_provider,
+                    force_serpapi=force_serpapi,
+                    serpapi=serpapi_instance,
+                )
+                for r in results:
+                    provider_usage[r.get("provider", "unknown")] = provider_usage.get(r.get("provider", "unknown"), 0) + 1
+                if results:
+                    local_queries_run += 1
+                    _save_query(db, book_id, entity_type, entity_name, q, len(results), "aggregate")
                 all_images.extend(results)
+            else:
+                results, used_provider = await _search_with_providers(
+                    q, entity_type, providers,
+                    count=count_per_provider,
+                    force_serpapi=force_serpapi,
+                    serpapi=serpapi_instance,
+                )
+                if results:
+                    local_queries_run += 1
+                    provider_usage[used_provider] = provider_usage.get(used_provider, 0) + 1
+                    _save_query(db, book_id, entity_type, entity_name, q, len(results), used_provider)
+                    for r in results:
+                        r["query_text"] = q
+                    all_images.extend(results)
 
-        filtered = _filter_and_dedupe(all_images, max_results=15)
+        filtered = _filter_dedupe_and_rank(
+            all_images,
+            min_size=512,
+            max_results=MAX_REFERENCE_IMAGES_PER_ENTITY,
+        )
+        # Drop internal fields from API response if desired (keep provider, url, thumbnail, etc.)
+        for img in filtered:
+            img.pop("query_text", None)
+            img.pop("search_metadata", None)
         return {
             "id": entity.id,
             "name": entity.name,
@@ -806,12 +1136,128 @@ async def search_references_for_book(
                 assign_placeholder(db, loc.id, "location")
             loc_results.append({"id": loc.id, "name": loc.name, "is_main": bool(loc.is_main), "images": [], "placeholder_assigned": True})
 
+    # Artefact search
+    artefact_results: list[dict] = []
+    user_artefact_queries = artefact_queries or {}
+    if search_artefacts and db:
+        artefacts = crud.get_artefacts_by_book(db, book_id)
+        if main_only:
+            artefacts = [a for a in artefacts if a.is_main]
+        for artefact in artefacts:
+            ontology = {}
+            if getattr(artefact, "ontology_json", None):
+                try:
+                    ontology = _json.loads(artefact.ontology_json) or {}
+                except (ValueError, TypeError):
+                    pass
+            entity_class = (ontology.get("entity_class") or "other_artefact").strip() or "other_artefact"
+            if artefact.id in user_artefact_queries and user_artefact_queries[artefact.id]:
+                queries = [q.strip() for q in user_artefact_queries[artefact.id] if q and str(q).strip()]
+            else:
+                desc = artefact.physical_description or ""
+                visual_tokens = _get_visual_tokens_for_artefact(db, artefact.id)
+                queries = _build_queries_artefact(desc, book_info, visual_tokens, ontology, name=artefact.name)
+            if not queries:
+                artefact_results.append({"id": artefact.id, "name": artefact.name, "is_main": bool(artefact.is_main), "images": [], "placeholder_assigned": False})
+                continue
+            provider_names = select_engines(
+                entity_class, "artefact", style_category,
+                available_provider_names, engine_ratings, top_n=4,
+            )
+            providers = [ALL_PROVIDERS[n] for n in provider_names if n in ALL_PROVIDERS]
+            all_images: list[dict] = []
+            for q in queries:
+                results = await _search_all_providers(
+                    q, "artefact", providers,
+                    count_per_provider=30,
+                    force_serpapi=False,
+                    serpapi=serpapi_instance,
+                )
+                for r in results:
+                    r["query_text"] = q
+                    provider_usage[r.get("provider", "unknown")] = provider_usage.get(r.get("provider", "unknown"), 0) + 1
+                if results:
+                    queries_run += 1
+                    _save_query(db, book_id, "artefact", artefact.name, q, len(results), "aggregate")
+                all_images.extend(results)
+            filtered = _filter_dedupe_and_rank(all_images, min_size=512, max_results=MAX_REFERENCE_IMAGES_PER_ENTITY)
+            for img in filtered:
+                img.pop("query_text", None)
+                img.pop("search_metadata", None)
+            artefact_results.append({
+                "id": artefact.id,
+                "name": artefact.name,
+                "is_main": bool(artefact.is_main),
+                "images": filtered,
+                "placeholder_assigned": False,
+            })
+
+    # Cover search
+    cover_result: Optional[dict] = None
+    if search_cover and db:
+        cover_analysis = crud.get_cover_analysis(db, book_id)
+        # Use user-provided cover_queries override if given; otherwise build from cover_analysis
+        if cover_queries and len(cover_queries) > 0:
+            cover_query_list = cover_queries
+            # Still need cover_analysis row to store reference images; create minimal if missing
+            if not cover_analysis:
+                cover_analysis = crud.create_or_update_cover_analysis(db, book_id)
+        elif cover_analysis:
+            anchors = []
+            if getattr(cover_analysis, "symbolic_anchors", None):
+                try:
+                    anchors = _json.loads(cover_analysis.symbolic_anchors) if isinstance(cover_analysis.symbolic_anchors, str) else (cover_analysis.symbolic_anchors or [])
+                except (ValueError, TypeError):
+                    pass
+            mood_kw = []
+            if getattr(cover_analysis, "cover_mood_keywords", None):
+                try:
+                    mood_kw = _json.loads(cover_analysis.cover_mood_keywords) if isinstance(cover_analysis.cover_mood_keywords, str) else (cover_analysis.cover_mood_keywords or [])
+                except (ValueError, TypeError):
+                    pass
+            genre = getattr(book, "genre", None) or ""
+            cover_query_list = _build_cover_queries(anchors, mood_kw, style_category, genre)
+        else:
+            cover_query_list = []
+        if cover_analysis and cover_query_list:
+            provider_names = select_engines(
+                "cover", "cover", style_category,
+                available_provider_names, engine_ratings, top_n=4,
+            )
+            providers = [ALL_PROVIDERS[n] for n in provider_names if n in ALL_PROVIDERS]
+            all_cover_images: list[dict] = []
+            for q in cover_query_list:
+                results = await _search_all_providers(
+                    q, "cover", providers,
+                    count_per_provider=30,
+                    force_serpapi=False,
+                    serpapi=serpapi_instance,
+                )
+                for r in results:
+                    r["query_text"] = q
+                    provider_usage[r.get("provider", "unknown")] = provider_usage.get(r.get("provider", "unknown"), 0) + 1
+                if results:
+                    queries_run += 1
+                    _save_query(db, book_id, "cover", "cover", q, len(results), "aggregate")
+                all_cover_images.extend(results)
+            filtered_cover = _filter_dedupe_and_rank(all_cover_images, min_size=512, max_results=MAX_REFERENCE_IMAGES_PER_ENTITY)
+            for img in filtered_cover:
+                img.pop("query_text", None)
+                img.pop("search_metadata", None)
+            cover_result = {
+                "id": cover_analysis.id,
+                "name": "cover",
+                "images": filtered_cover,
+            }
+
     mode = "all" if search_all else "main_only"
     return {
         "book_id": book_id,
         "mode": mode,
         "characters": char_results,
         "locations": loc_results,
+        "artefacts": artefact_results,
+        "cover": cover_result,
         "queries_run": queries_run,
         "provider_usage": {k: v for k, v in provider_usage.items() if v > 0},
     }

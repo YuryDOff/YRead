@@ -58,6 +58,7 @@ class PexelsProvider(BaseImageProvider):
         results: list[dict] = []
         for photo in data.get("photos", [])[:count]:
             src = photo.get("src", {})
+            alt = (photo.get("alt") or "").strip()
             results.append({
                 "url": src.get("large") or src.get("original") or "",
                 "thumbnail": src.get("small") or src.get("medium") or "",
@@ -66,5 +67,6 @@ class PexelsProvider(BaseImageProvider):
                 "credit": photo.get("photographer", "Pexels"),
                 "license": "Pexels License (free for commercial use)",
                 "provider": self.name,
+                "search_metadata": {"title": "", "description": "", "alt": alt, "tags": ""},
             })
         return [r for r in results if r["url"]]

@@ -48,6 +48,7 @@ class Scene(Base):
     book = relationship("Book", back_populates="scenes")
     scene_characters = relationship("SceneCharacter", cascade="all, delete-orphan")
     scene_locations = relationship("SceneLocation", cascade="all, delete-orphan")
+    scene_artefacts = relationship("SceneArtefact", cascade="all, delete-orphan")
     illustrations = relationship("Illustration", back_populates="scene", cascade="all, delete-orphan")
 
     __table_args__ = (Index("ix_scenes_book_id", "book_id"),)
@@ -75,6 +76,16 @@ class SceneLocation(Base):
     location = relationship("Location")
 
     __table_args__ = (UniqueConstraint("scene_id", "location_id", name="uq_scene_location"),)
+
+
+class SceneArtefact(Base):
+    __tablename__ = "scene_artefacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scene_id = Column(Integer, ForeignKey("scenes.id"), nullable=False)
+    artefact_id = Column(Integer, ForeignKey("artefacts.id"), nullable=False)
+
+    __table_args__ = (UniqueConstraint("scene_id", "artefact_id", name="uq_scene_artefact"),)
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +131,13 @@ class Book(Base):
     is_well_known_book = Column(Boolean, default=False)  # B2B: is it a well-known book?
     well_known_book_title = Column(Text, nullable=True)  # B2B: title of the well-known published work (e.g. "A Study in Scarlet")
     similar_book_title = Column(Text, nullable=True)  # B2B: reference book for search optimization
-    scene_count = Column(Integer, nullable=True, default=10)
+    scene_count = Column(Integer, nullable=True, default=10)  # legacy; extraction uses total_words
+    scene_display_count = Column(Integer, default=10)  # how many scenes to show in UI
+    target_audience = Column(String, default="adult")  # children|ya|adult|literary
+    search_query_strategy = Column(String, default="tokens")  # tokens|adaptive
     known_adaptations_json = Column(Text, nullable=True)
+    entity_activations = Column(Text, nullable=True)  # JSON array e.g. ["cover", "characters"]
+    genre = Column(Text, nullable=True)  # e.g. fantasy, sci-fi, thriller
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -136,6 +152,16 @@ class Book(Base):
     search_queries = relationship("SearchQuery", back_populates="book", cascade="all, delete-orphan")
     scenes = relationship("Scene", back_populates="book", cascade="all, delete-orphan")
     engine_ratings = relationship("EngineRating", cascade="all, delete-orphan")
+    artefacts = relationship("Artefact", back_populates="book", cascade="all, delete-orphan")
+    cover_analysis = relationship(
+        "CoverAnalysis", back_populates="book", uselist=False, cascade="all, delete-orphan"
+    )
+    visual_bible_entries = relationship(
+        "VisualBibleEntry", back_populates="book", cascade="all, delete-orphan"
+    )
+    cover_concepts = relationship(
+        "CoverConcept", back_populates="book", cascade="all, delete-orphan"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +186,66 @@ class Chunk(Base):
     illustrations = relationship("Illustration", back_populates="chunk", cascade="all, delete-orphan")
     chunk_characters = relationship("ChunkCharacter", back_populates="chunk", cascade="all, delete-orphan")
     chunk_locations = relationship("ChunkLocation", back_populates="chunk", cascade="all, delete-orphan")
+    chunk_artefacts = relationship("ChunkArtefact", back_populates="chunk", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_chunks_book_id", "book_id"),
         Index("ix_chunks_book_index", "book_id", "chunk_index"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Artefacts (objects characters act upon; four-entity model)
+# ---------------------------------------------------------------------------
+
+class Artefact(Base):
+    __tablename__ = "artefacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    name = Column(String, nullable=False)
+    physical_description = Column(Text, nullable=True)
+    symbolic_role = Column(Text, nullable=True)
+    narrative_function = Column(String, nullable=True)  # Tool|MacGuffin|Symbol|Weapon|Token
+    typical_contexts = Column(Text, nullable=True)
+    is_main = Column(Integer, default=0)
+    visual_type = Column(String, nullable=True)
+    is_well_known_entity = Column(Integer, default=0)
+    canonical_search_name = Column(String, nullable=True)
+    search_visual_analog = Column(Text, nullable=True)
+    text_to_image_prompt = Column(Text, nullable=True)
+    ontology_json = Column(Text, nullable=True)
+    entity_visual_tokens_json = Column(Text, nullable=True)
+    reference_image_url = Column(Text, nullable=True)
+    selected_reference_urls = Column(Text, nullable=True)  # JSON array of strings
+    visual_bible_images = Column(Text, nullable=True)  # JSON array of image paths
+    visual_bible_depth = Column(Integer, nullable=True)  # 2, 3, or 4 images
+    is_selected_for_reference = Column(Integer, default=0)  # UI selection for reference search
+    full_description = Column(Text, nullable=True)  # 1–2 sentence visual description for search/generation
+
+    book = relationship("Book", back_populates="artefacts")
+
+    __table_args__ = (Index("ix_artefacts_book_id", "book_id"),)
+
+
+# ---------------------------------------------------------------------------
+# Junction: Chunk ↔ Artefact
+# ---------------------------------------------------------------------------
+
+class ChunkArtefact(Base):
+    __tablename__ = "chunk_artefacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=False)
+    artefact_id = Column(Integer, ForeignKey("artefacts.id"), nullable=False)
+
+    chunk = relationship("Chunk", back_populates="chunk_artefacts")
+    artefact = relationship("Artefact")
+
+    __table_args__ = (
+        UniqueConstraint("chunk_id", "artefact_id", name="uq_chunk_artefact"),
+        Index("ix_chunk_artefacts_chunk_id", "chunk_id"),
+        Index("ix_chunk_artefacts_artefact_id", "artefact_id"),
     )
 
 
@@ -190,6 +272,10 @@ class Character(Base):
     text_to_image_prompt = Column(Text, nullable=True)
     ontology_json = Column(Text, nullable=True)
     entity_visual_tokens_json = Column(Text, nullable=True)
+    cover_role = Column(Integer, default=0)  # AI-suggested candidate for cover image
+    visual_bible_depth = Column(Integer, nullable=True)  # AI-suggested 3–6 images
+    is_selected_for_reference = Column(Integer, default=0)  # UI selection for reference search; never overwrite is_main
+    full_description = Column(Text, nullable=True)  # 1–2 sentence visual description for search/generation
 
     # Relationships
     book = relationship("Book", back_populates="characters")
@@ -221,6 +307,10 @@ class Location(Base):
     text_to_image_prompt = Column(Text, nullable=True)
     ontology_json = Column(Text, nullable=True)
     entity_visual_tokens_json = Column(Text, nullable=True)
+    cover_role = Column(Integer, default=0)  # AI-suggested candidate for cover image
+    visual_bible_depth = Column(Integer, nullable=True)  # AI-suggested 3–6 images
+    is_selected_for_reference = Column(Integer, default=0)  # UI selection for reference search; never overwrite is_main
+    full_description = Column(Text, nullable=True)  # 1–2 sentence visual description for search/generation
 
     # Relationships
     book = relationship("Book", back_populates="locations")
@@ -248,6 +338,91 @@ class VisualBible(Base):
 
     # Relationships
     book = relationship("Book", back_populates="visual_bible")
+
+
+# ---------------------------------------------------------------------------
+# Cover Analysis (one per book; cover-only workflow)
+# ---------------------------------------------------------------------------
+
+class CoverAnalysis(Base):
+    __tablename__ = "cover_analysis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False, unique=True)
+    thematic_statement = Column(Text, nullable=True)
+    emotional_promise = Column(Text, nullable=True)
+    dominant_motifs = Column(Text, nullable=True)  # JSON array of strings
+    symbolic_anchors = Column(Text, nullable=True)  # JSON array of strings (1-2)
+    cover_mood_keywords = Column(Text, nullable=True)  # JSON array of strings (5-8)
+    genre_conventions = Column(Text, nullable=True)
+    genre_subversion_opportunity = Column(Text, nullable=True)
+    typography_direction = Column(Text, nullable=True)
+    color_palette_direction = Column(Text, nullable=True)  # JSON
+    cover_t2i_prompt = Column(Text, nullable=True)
+    cover_negative_prompt = Column(Text, nullable=True)
+    cover_role_character_ids = Column(Text, nullable=True)  # JSON array of character ids
+    cover_role_location_ids = Column(Text, nullable=True)  # JSON array of location ids
+    cover_role_artefact_ids = Column(Text, nullable=True)  # JSON array of artefact ids
+    cover_type = Column(String, nullable=True)  # object_centered|character_centered|setting_centered|abstract|typography_centered
+    color_palette_structured = Column(Text, nullable=True)  # JSON: dominant, accent, temperature, contrast, saturation
+    primary_cover_character_id = Column(Integer, nullable=True)
+    primary_cover_location_id = Column(Integer, nullable=True)
+    primary_cover_artefact_id = Column(Integer, nullable=True)
+    full_description = Column(Text, nullable=True)  # Full narrative description for search/generation prompts
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    book = relationship("Book", back_populates="cover_analysis")
+
+    __table_args__ = (Index("ix_cover_analysis_book_id", "book_id"),)
+
+
+# ---------------------------------------------------------------------------
+# Visual Bible Entries (per-entity generated images)
+# ---------------------------------------------------------------------------
+
+class VisualBibleEntry(Base):
+    __tablename__ = "visual_bible_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    entity_type = Column(String, nullable=False)  # "character"|"location"|"artefact"
+    entity_id = Column(Integer, nullable=False)
+    angle_label = Column(String, nullable=True)  # e.g. "front", "3/4 left"
+    prompt_used = Column(Text, nullable=True)
+    image_path = Column(Text, nullable=True)
+    status = Column(String, default="pending")  # pending|generating|complete|failed
+    is_approved = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="visual_bible_entries")
+
+    __table_args__ = (
+        Index("ix_vb_entries_book_entity", "book_id", "entity_type", "entity_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cover Concepts (1–3 variants per book)
+# ---------------------------------------------------------------------------
+
+class CoverConcept(Base):
+    __tablename__ = "cover_concepts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    concept_index = Column(Integer, nullable=False)  # 1, 2, 3
+    prompt_used = Column(Text, nullable=True)
+    negative_prompt = Column(Text, nullable=True)
+    style_variant = Column(String, nullable=True)  # photographic|illustrated|abstract|typographic
+    image_path = Column(Text, nullable=True)
+    status = Column(String, default="pending")
+    is_selected = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    book = relationship("Book", back_populates="cover_concepts")
+
+    __table_args__ = (Index("ix_cover_concepts_book_id", "book_id"),)
 
 
 # ---------------------------------------------------------------------------

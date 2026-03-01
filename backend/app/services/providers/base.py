@@ -26,7 +26,9 @@ class BaseImageProvider(ABC):
             count: Max results to return
 
         Returns:
-            List of normalised dicts: {url, thumbnail, width, height, credit, license, provider}
+            List of normalised dicts: {url, thumbnail, width, height, credit, license, provider}.
+            Optional for relevance scoring: search_metadata (dict with title, description, alt, tags)
+            or top-level title, description, alt, tags (all optional).
         """
         ...
 

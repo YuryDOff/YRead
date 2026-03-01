@@ -30,7 +30,7 @@ def _get_client() -> OpenAI:
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 SCENE_EXTRACTION_PROMPT = """\
-Given N candidate scene windows from a novel, select and refine exactly {scene_count} scenes.
+Given N candidate scene windows from a novel, select between {min_scenes} and {max_scenes} scenes. Prefer more scenes over fewer — it is better to capture a minor moment than to omit a significant one. The caller will filter by priority for display.
 
 LANGUAGE RULES (mandatory):
 - The following fields are stored and used for image search and text-to-image APIs — write them ONLY in ENGLISH: title, narrative_summary, visual_description, scene_prompt_draft.
@@ -64,6 +64,14 @@ For each selected scene return:
 
 Return ONLY valid JSON: {"scenes": [...]}
 """
+
+
+def _auto_scene_count(total_words: int) -> int:
+    """
+    One scene per ~3000 words. Min 5, max 30.
+    Used for extraction; display count is a separate UI concern.
+    """
+    return max(5, min(30, total_words // 3000))
 
 # ---------------------------------------------------------------------------
 # Visual density numeric mapping
@@ -220,13 +228,14 @@ def group_chunks_into_candidate_scenes(
 
 def extract_scenes_llm(
     candidates: list[dict],
-    scene_count: int,
+    min_scenes: int,
+    max_scenes: int,
     chunk_text_map: Optional[dict[int, str]] = None,
     manuscript_lang: str = "en",
     analysis_run_id: Optional[str] = None,
 ) -> list[dict]:
     """
-    Single LLM call to select and refine exactly scene_count scenes from candidates.
+    Single LLM call to select between min_scenes and max_scenes scenes from candidates.
 
     candidates: output of group_chunks_into_candidate_scenes()
     chunk_text_map: optional {chunk_index: text} for richer context
@@ -274,17 +283,18 @@ def extract_scenes_llm(
                 summary["text_excerpt"] = " [...] ".join(texts)
         candidate_summaries.append(summary)
 
-    prompt = SCENE_EXTRACTION_PROMPT.replace("{scene_count}", str(scene_count))
+    prompt = SCENE_EXTRACTION_PROMPT.replace("{min_scenes}", str(min_scenes)).replace("{max_scenes}", str(max_scenes))
     user_content = json.dumps({
-        "scene_count": scene_count,
+        "min_scenes": min_scenes,
+        "max_scenes": max_scenes,
         "manuscript_lang": manuscript_lang,
         "candidates": candidate_summaries,
         **({"analysis_run_id": analysis_run_id} if analysis_run_id else {}),
     }, ensure_ascii=False)
 
     logger.info(
-        "[scene_extractor] extract_scenes_llm: %d candidates → %d scenes",
-        len(candidates), scene_count,
+        "[scene_extractor] extract_scenes_llm: %d candidates → [%d..%d] scenes",
+        len(candidates), min_scenes, max_scenes,
     )
 
     try:
@@ -305,7 +315,7 @@ def extract_scenes_llm(
         )
     except Exception as e:
         logger.error("[scene_extractor] LLM call failed: %s", e)
-        return _build_scene_fallbacks(candidates, scene_count)
+        return _build_scene_fallbacks(candidates, max_scenes)
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
@@ -319,7 +329,7 @@ def extract_scenes_llm(
             raise ValueError("Expected scenes list")
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("[scene_extractor] Failed to parse LLM response: %s | raw: %s", e, raw[:500])
-        return _build_scene_fallbacks(candidates, scene_count)
+        return _build_scene_fallbacks(candidates, max_scenes)
 
     # Validate and normalise each scene
     validated: list[dict] = []
@@ -335,8 +345,20 @@ def extract_scenes_llm(
         elif span > 7:
             chunk_end = chunk_start + 6
 
+        raw_title = (scene.get("title") or "").strip()
+        if raw_title and not raw_title.lower().startswith("scene "):
+            title = raw_title
+        else:
+            # Derive a short title from narrative_summary when LLM returns no real title
+            summary = (scene.get("narrative_summary") or "").strip()
+            if summary:
+                words = summary.split()[:7]
+                title = " ".join(words) + ("..." if len(summary.split()) > 7 else "")
+            else:
+                title = f"Scene {len(validated) + 1}"
+
         validated.append({
-            "title": scene.get("title") or f"Scene {len(validated) + 1}",
+            "title": title,
             "title_display": scene.get("title_display") or None,
             "scene_type": scene.get("scene_type") or "atmospheric",
             "chunk_start_index": chunk_start,
@@ -353,18 +375,25 @@ def extract_scenes_llm(
 
     # If LLM returned fewer scenes than requested, pad with fallbacks from candidates
     if len(validated) < scene_count:
-        fallbacks = _build_scene_fallbacks(candidates, scene_count - len(validated))
+        fallbacks = _build_scene_fallbacks(candidates, max_scenes - len(validated))
         validated.extend(fallbacks)
 
-    return validated[:scene_count]
+    return validated[:max_scenes]
 
 
 def _build_scene_fallbacks(candidates: list[dict], count: int) -> list[dict]:
     """Build fallback scenes from candidates when LLM fails."""
     scenes: list[dict] = []
     for i, cand in enumerate(candidates[:count]):
+        title = f"Scene {i + 1}"
+        for ch in cand.get("sample_chunks", [])[:1]:
+            summary = (ch.get("narrative_summary") or "").strip()
+            if summary:
+                words = summary.split()[:7]
+                title = " ".join(words) + ("..." if len(summary.split()) > 7 else "")
+                break
         scenes.append({
-            "title": f"Scene {i + 1}",
+            "title": title,
             "title_display": None,
             "scene_type": "atmospheric",
             "chunk_start_index": cand["chunk_start"],
@@ -388,17 +417,17 @@ def _build_scene_fallbacks(candidates: list[dict], count: int) -> list[dict]:
 
 def extract_scenes(
     chunk_analyses: list[dict],
-    scene_count: int,
+    total_words: int = 0,
     chunk_text_map: Optional[dict[int, str]] = None,
     manuscript_lang: str = "en",
     analysis_run_id: Optional[str] = None,
 ) -> list[dict]:
     """
-    Full two-pass scene extraction.
+    Full two-pass scene extraction. Scene count is derived from total_words (min 5, max 30).
 
     Args:
         chunk_analyses: list of chunk analysis dicts (with dramatic_score, visual_density, etc.)
-        scene_count: exact number of scenes to return
+        total_words: word count of manuscript; used to compute min/max scenes (~1 per 3000 words)
         chunk_text_map: optional {chunk_index: text} for richer LLM context
         manuscript_lang: ISO 639-1 code; when not "en", scenes get title_display and narrative_summary_display
 
@@ -407,16 +436,19 @@ def extract_scenes(
         narrative_summary, narrative_summary_display, visual_description, characters_present,
         primary_location, visual_intensity, illustration_priority, scene_prompt_draft.
     """
-    if not chunk_analyses or scene_count <= 0:
+    if not chunk_analyses:
         return []
 
+    min_scenes = _auto_scene_count(total_words)
+    max_scenes = min(min_scenes * 2, 30)
+
     logger.info(
-        "[scene_extractor] extract_scenes: %d chunks, scene_count=%d, manuscript_lang=%s",
-        len(chunk_analyses), scene_count, manuscript_lang,
+        "[scene_extractor] extract_scenes: %d chunks, total_words=%d, min=%d max=%d, manuscript_lang=%s",
+        len(chunk_analyses), total_words, min_scenes, max_scenes, manuscript_lang,
     )
 
-    # Pass A: sliding window
-    candidates = group_chunks_into_candidate_scenes(chunk_analyses, scene_count)
+    # Pass A: sliding window (request enough candidates for max_scenes)
+    candidates = group_chunks_into_candidate_scenes(chunk_analyses, max_scenes)
     logger.info("[scene_extractor] Pass A: %d candidates", len(candidates))
 
     if not candidates:
@@ -424,8 +456,10 @@ def extract_scenes(
 
     # Pass B: LLM refinement
     scenes = extract_scenes_llm(
-        candidates, scene_count, chunk_text_map=chunk_text_map,
-        manuscript_lang=manuscript_lang, analysis_run_id=analysis_run_id,
+        candidates, min_scenes, max_scenes,
+        chunk_text_map=chunk_text_map,
+        manuscript_lang=manuscript_lang,
+        analysis_run_id=analysis_run_id,
     )
     logger.info("[scene_extractor] Pass B: %d scenes selected", len(scenes))
 

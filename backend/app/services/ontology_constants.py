@@ -23,6 +23,13 @@ ENTITY_CLASSES = [
     "alien", "alien_humanoid", "hivemind", "eldritch",
 ]
 
+# Artefact-specific entity classes (Phase 3); used when entity_role="artefact"
+ARTEFACT_ENTITY_CLASSES = [
+    "physical_weapon", "magical_weapon", "document_scroll", "vessel_container",
+    "clothing_armour", "instrument_device", "vehicle", "magical_item",
+    "natural_object", "symbolic_token", "other_artefact",
+]
+
 # Parent class hierarchy for tiered fallback in engine_selector
 ENTITY_PARENT: dict[str, str] = {
     "human_supernatural": "human",

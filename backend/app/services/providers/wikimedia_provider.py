@@ -8,6 +8,8 @@ from app.services.providers.base import BaseImageProvider
 logger = logging.getLogger(__name__)
 
 WIKIMEDIA_API_BASE = "https://commons.wikimedia.org/w/api.php"
+# Required by Wikimedia: descriptive User-Agent with URL/contact, include "bot" to avoid 403
+WIKIMEDIA_USER_AGENT = "YReadReferenceSearch/1.0 (https://github.com; bot for reference image search)"
 
 
 class WikimediaProvider(BaseImageProvider):
@@ -41,12 +43,13 @@ class WikimediaProvider(BaseImageProvider):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Wikimedia requires a descriptive User-Agent or returns 403; set on client to override httpx default
+            async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": WIKIMEDIA_USER_AGENT}) as client:
                 resp = await client.get(WIKIMEDIA_API_BASE, params=params)
+                data = resp.json() if resp.status_code == 200 else {}
                 if resp.status_code != 200:
                     logger.error("Wikimedia API returned %s for query: %s", resp.status_code, query)
                     return []
-                data = resp.json()
         except Exception as e:
             logger.exception("Wikimedia search failed: %s", e)
             return []

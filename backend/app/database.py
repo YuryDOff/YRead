@@ -35,6 +35,8 @@ def init_db():
         Illustration, Cover, KDPExport, ChunkCharacter, ChunkLocation,
         SearchQuery, ReferenceImage,
         Scene, SceneCharacter, SceneLocation, EngineRating,
+        Artefact, ChunkArtefact, SceneArtefact,
+        CoverAnalysis, VisualBibleEntry, CoverConcept,
     )
     try:
         Base.metadata.create_all(bind=engine)
@@ -48,6 +50,10 @@ def _run_migrations():
     # Existing migrations
     _add_column_if_missing("characters", "is_main", "INTEGER DEFAULT 0")
     _add_column_if_missing("locations", "is_main", "INTEGER DEFAULT 0")
+    # Phase 7 BUG-1: reference selection separate from is_main
+    _add_column_if_missing("characters", "is_selected_for_reference", "INTEGER DEFAULT 0")
+    _add_column_if_missing("locations", "is_selected_for_reference", "INTEGER DEFAULT 0")
+    _add_column_if_missing("artefacts", "is_selected_for_reference", "INTEGER DEFAULT 0")
     
     # B2B migrations for books table
     _add_column_if_missing("books", "workflow_type", "TEXT DEFAULT 'full'")
@@ -85,6 +91,22 @@ def _run_migrations():
     # v3: Book scene count + known adaptations
     _add_column_if_missing("books", "scene_count", "INTEGER DEFAULT 10")
     _add_column_if_missing("books", "known_adaptations_json", "TEXT")
+    # Phase 7 BUG-2: display count (extraction uses total_words)
+    _add_column_if_missing("books", "scene_display_count", "INTEGER DEFAULT 10")
+    _add_column_if_missing("books", "target_audience", "TEXT DEFAULT 'adult'")
+
+    # Phase 7.1: Cover analysis extensions
+    _add_column_if_missing("cover_analysis", "cover_type", "TEXT")
+    _add_column_if_missing("cover_analysis", "color_palette_structured", "TEXT")
+    _add_column_if_missing("cover_analysis", "primary_cover_character_id", "INTEGER")
+    _add_column_if_missing("cover_analysis", "primary_cover_location_id", "INTEGER")
+    _add_column_if_missing("cover_analysis", "primary_cover_artefact_id", "INTEGER")
+    # Phase 7.5: full_description, search_query_strategy
+    _add_column_if_missing("characters", "full_description", "TEXT")
+    _add_column_if_missing("locations", "full_description", "TEXT")
+    _add_column_if_missing("artefacts", "full_description", "TEXT")
+    _add_column_if_missing("cover_analysis", "full_description", "TEXT")
+    _add_column_if_missing("books", "search_query_strategy", "TEXT DEFAULT 'tokens'")
 
     # v3: Illustration scene_id + prompt_used
     _add_column_if_missing("illustrations", "scene_id", "INTEGER")
@@ -93,6 +115,14 @@ def _run_migrations():
     # Scene display in manuscript language (for cohesive UX)
     _add_column_if_missing("scenes", "title_display", "TEXT")
     _add_column_if_missing("scenes", "narrative_summary_display", "TEXT")
+
+    # Phase 1: Four-entity model
+    _add_column_if_missing("books", "entity_activations", "TEXT")
+    _add_column_if_missing("books", "genre", "TEXT")
+    _add_column_if_missing("characters", "cover_role", "INTEGER DEFAULT 0")
+    _add_column_if_missing("characters", "visual_bible_depth", "INTEGER")
+    _add_column_if_missing("locations", "cover_role", "INTEGER DEFAULT 0")
+    _add_column_if_missing("locations", "visual_bible_depth", "INTEGER")
 
     # Reference images pool table (created via create_all if new)
 
