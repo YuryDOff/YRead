@@ -14,6 +14,7 @@ from app.schemas import (
 )
 from app import crud
 from app.services.t2i_providers import ALL_T2I_PROVIDERS
+from app.services.engine_selector import get_cover_t2i_provider
 from app.services.t2i_providers.base import T2IRequest
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,8 @@ async def _run_cover_concept_t2i(concept_id: int, prompt: str, negative_prompt: 
 
     db = SessionLocal()
     try:
-        provider = ALL_T2I_PROVIDERS.get("abstract")
+        provider_name = get_cover_t2i_provider()
+        provider = ALL_T2I_PROVIDERS.get(provider_name) or ALL_T2I_PROVIDERS.get("abstract")
         if not provider:
             return
         req = T2IRequest(prompt=prompt or "Cover concept", negative_prompt=negative_prompt or "")

@@ -181,3 +181,10 @@ def select_engines(
                 break
 
     return selected
+
+
+
+def get_cover_t2i_provider() -> str:
+    """Return configured cover T2I provider name."""
+    import os
+    return os.getenv("COVER_T2I_PROVIDER", "flux").strip().lower() or "flux"

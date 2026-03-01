@@ -12,6 +12,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     Boolean,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 
@@ -128,6 +129,7 @@ class Book(Base):
     status = Column(String, default="imported")  # imported | analyzing | ready | reading
     is_well_known = Column(Integer, default=0)  # 0 = no, 1 = yes (SQLite bool)
     workflow_type = Column(String, default="full")  # 'full' or 'cover_only'
+    analysis_mode = Column(String(20), nullable=False, default="pro", server_default="pro")
     is_well_known_book = Column(Boolean, default=False)  # B2B: is it a well-known book?
     well_known_book_title = Column(Text, nullable=True)  # B2B: title of the well-known published work (e.g. "A Study in Scarlet")
     similar_book_title = Column(Text, nullable=True)  # B2B: reference book for search optimization
@@ -369,6 +371,9 @@ class CoverAnalysis(Base):
     primary_cover_location_id = Column(Integer, nullable=True)
     primary_cover_artefact_id = Column(Integer, nullable=True)
     full_description = Column(Text, nullable=True)  # Full narrative description for search/generation prompts
+    reference_style_template = Column(Text, nullable=True)
+    reference_style_notes = Column(JSON, nullable=True)
+    reference_image_url = Column(String(2048), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

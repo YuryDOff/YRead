@@ -45,6 +45,7 @@ def create_book(
     total_words: Optional[int] = None,
     total_pages: Optional[int] = None,
     is_well_known: bool = False,
+    analysis_mode: str = "pro",
 ) -> Book:
     book = Book(
         title=title,
@@ -54,6 +55,7 @@ def create_book(
         total_words=total_words,
         total_pages=total_pages,
         is_well_known=1 if is_well_known else 0,
+        analysis_mode=analysis_mode or "pro",
         status="imported",
     )
     db.add(book)

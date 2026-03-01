@@ -31,6 +31,7 @@ export interface Book {
   similar_book_title?: string | null;
   genre?: string | null;
   workflow_type?: string | null;
+  analysis_mode?: "simple" | "pro";
   created_at: string | null;
   updated_at: string | null;
 }
@@ -649,3 +650,37 @@ export async function updateProgress(bookId: number, currentPage: number) {
 }
 
 export default api;
+
+
+export interface CoverConcept {
+  id: number;
+  book_id: number;
+  concept_index: number;
+  prompt_used: string | null;
+  negative_prompt: string | null;
+  style_variant: string | null;
+  image_path: string | null;
+  status: string;
+  is_selected: number;
+}
+
+export async function listCoverConcepts(bookId: number): Promise<CoverConcept[]> {
+  const { data } = await api.get<CoverConcept[]>(`/books/${bookId}/cover-concepts`);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function generateCoverConcepts(
+  bookId: number,
+  body: { concept_count?: number; prompt?: string; negative_prompt?: string; style_variant?: string },
+): Promise<{ queued: number; concepts: CoverConcept[] }> {
+  const { data } = await api.post<{ queued: number; concepts: CoverConcept[] }>(`/books/${bookId}/cover-concepts/generate`, body);
+  return data;
+}
+
+export async function analyzeCoverReference(
+  bookId: number,
+  body: { image_url: string; mode?: 'cover' | 'illustration' },
+): Promise<{ style_template: string; composition_notes: string; color_palette_extracted: Record<string, unknown>; style_tags: string[]; mood_keywords: string[]; lighting_description: string }> {
+  const { data } = await api.post(`/books/${bookId}/analyze-cover-reference`, body);
+  return data;
+}
