@@ -40,17 +40,30 @@ export default function CreateBookPage() {
 
   function handleUploadSuccess(book: Book, metadata?: BookUploadMetadata) {
     ctx.setBook(book);
+    const mode = book.analysis_mode ?? 'pro';
+    ctx.setWorkflowType(mode === 'simple' ? 'cover_only' : 'full_book');
     if (metadata?.genre) {
       ctx.setStyleCategory(genreToStyleCategory(metadata.genre));
+      ctx.setGenre(metadata.genre);
     }
     if (metadata?.author) {
       ctx.setAuthorName(metadata.author);
     }
+    // For simple/cover_only: skip StyleSelector, go directly to analysis.
+    // Pass book directly — ctx.setBook(book) is async, so ctx.book is still null here.
+    if (book.analysis_mode === 'simple') {
+      ctx.setEntityTypes(['cover', 'characters']);
+      ctx.setSceneCount(0);
+      setStep('analyzing');
+      handleAnalyze(undefined, book);
+      return;
+    }
     setStep('style');
   }
 
-  async function handleAnalyze(formValues?: { sceneCount: number }) {
-    if (!ctx.book) return;
+  async function handleAnalyze(formValues?: { sceneCount: number }, bookOverride?: Book) {
+    const activeBook = bookOverride ?? ctx.book;
+    if (!activeBook) return;
     setAnalyzeLoading(true);
     setAnalysisProgress(null);
     setStep('analyzing');
@@ -58,7 +71,7 @@ export default function CreateBookPage() {
       const entityTypes = ctx.entityTypes?.length ? ctx.entityTypes : ['cover', 'characters', 'locations', 'artefacts'];
       const sceneDisplayCount = formValues?.sceneCount ?? ctx.sceneCount ?? 10;
       await analyzeBook(
-        ctx.book.id,
+        activeBook.id,
         {
           style_category: ctx.styleCategory,
           illustration_frequency: ctx.illustrationFrequency,
@@ -79,7 +92,7 @@ export default function CreateBookPage() {
       );
 
       // Navigate to analysis review so user can select main entities
-      navigate(`/books/${ctx.book.id}/analysis-review`);
+      navigate(`/books/${activeBook.id}/analysis-review`);
     } catch (err: unknown) {
       console.error(err);
       const detail =

@@ -380,6 +380,9 @@ Return ONLY valid JSON with these exact keys:
 - cover_role_character_ids_hints (array of character names suggested for cover)
 - cover_role_location_ids_hints (array of location names suggested for cover)
 - cover_role_artefact_ids_hints (array of artefact names suggested for cover)
+- cover_type (string: one of "object_centered"|"character_centered"|"setting_centered"|"abstract"|"typography_centered". Apply: if symbolic_anchors non-empty → "object_centered"; if genre is fantasy/romance/ya and dominant protagonist → "character_centered"; if genre is literary_fiction/thriller/mystery → "abstract"; if genre is non_fiction/biography → "typography_centered"; otherwise → "setting_centered".)
+- color_palette_structured (object with keys: dominant (string), accent (string), temperature ("warm"|"cool"|"neutral"), contrast ("high"|"mid"|"low"), saturation ("saturated"|"desaturated"|"monochrome"|"mixed"))
+- cover_role_primary_hint (string: the ONE entity name—character, location, OR artefact—most suited as the primary focal element of the cover; not a list)
 
 Use the provided genre conventions. Character/location/artefact hints are names only; caller will resolve to ids.
 ```
@@ -407,11 +410,11 @@ Use the provided genre conventions. Character/location/artefact hints are names 
 ## 11. Scene extraction
 
 **Source:** `scene_extractor.py`  
-**Constant:** `SCENE_EXTRACTION_PROMPT` (placeholder `{scene_count}` replaced at runtime)  
+**Constant:** `SCENE_EXTRACTION_PROMPT` (placeholders `{min_scenes}` and `{max_scenes}` replaced at runtime from `_auto_scene_count(total_words)`)  
 **Used by:** `extract_scenes_llm()`
 
 ```
-Given N candidate scene windows from a novel, select and refine exactly {scene_count} scenes.
+Given N candidate scene windows from a novel, select between {min_scenes} and {max_scenes} scenes. Prefer more scenes over fewer — it is better to capture a minor moment than to omit a significant one. The caller will filter by priority for display.
 
 LANGUAGE RULES (mandatory):
 - The following fields are stored and used for image search and text-to-image APIs — write them ONLY in ENGLISH: title, narrative_summary, visual_description, scene_prompt_draft.
@@ -507,5 +510,5 @@ CRITICAL RULES:
 | 8 | Cover | cover_analysis_service.py | COVER_THEMATIC_EXTRACTION_PROMPT | Stage 1: thematic material |
 | 9 | Cover | cover_analysis_service.py | COVER_BRIEF_SYNTHESIS_PROMPT | Stage 2: cover brief JSON |
 | 10 | Cover | cover_analysis_service.py | GENRE_COVER_CONVENTIONS | Genre hints for stage 2 |
-| 11 | Scenes | scene_extractor.py | SCENE_EXTRACTION_PROMPT | Select/refine N scenes from candidates |
+| 11 | Scenes | scene_extractor.py | SCENE_EXTRACTION_PROMPT | Select between min_scenes–max_scenes from candidates (min/max from total_words) |
 | 12 | Scenes | scene_visual_composer.py | SCENE_TOKEN_PROMPT | Scene visual tokens + T2I prompts |

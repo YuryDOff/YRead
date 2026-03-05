@@ -1,42 +1,80 @@
 """
-FLUX T2I provider skeleton.
-Supports fal.ai (FAL_API_KEY) or Replicate (REPLICATE_API_KEY).
-Only the skeleton is implemented — actual API calls are left as stubs for the T2I generation sprint.
+flux_provider.py
+-----------------
+FLUX.1 Pro (text-only) and FLUX.1 Kontext Pro (image+text) via fal.ai.
+
+FLUX Kontext is used when a moodboard reference URL is supplied — enabling
+style transfer from Visual Bible entity reference images.
+
+Install: pip install fal-client>=0.10.0
+Requires: FAL_API_KEY environment variable.
 """
+from __future__ import annotations
+
 import logging
 import os
 
-from app.services.t2i_providers.base import BaseT2IProvider, T2IRequest, T2IResult
+from .base import BaseCoverT2IProvider as BaseT2IProvider, T2IGenerationResult
 
 logger = logging.getLogger(__name__)
 
-FAL_API_KEY = os.getenv("FAL_API_KEY", "")
-REPLICATE_API_KEY = os.getenv("REPLICATE_API_KEY", "")
 
+class FluxKontextProvider(BaseT2IProvider):
+    TEXT_ENDPOINT = "fal-ai/flux-pro/v1.1"
+    KONTEXT_ENDPOINT = "fal-ai/flux-pro/kontext"
 
-class FluxProvider(BaseT2IProvider):
-    name = "flux"
+    def __init__(self) -> None:
+        api_key = os.getenv("FAL_API_KEY")
+        if not api_key:
+            raise EnvironmentError(
+                "FAL_API_KEY not set. Set it in .env before using FluxKontextProvider."
+            )
+        os.environ["FAL_KEY"] = api_key
 
     def is_available(self) -> bool:
-        return bool(FAL_API_KEY or REPLICATE_API_KEY)
+        return bool(os.getenv("FAL_API_KEY"))
 
-    def format_prompt(self, t2i_prompt_json: dict) -> str:
-        """Prefer FLUX-specific prompt; fall back to abstract."""
-        return (
-            t2i_prompt_json.get("flux")
-            or t2i_prompt_json.get("abstract")
-            or ""
+    async def generate(
+        self,
+        prompt: str,
+        image_url: str | None = None,
+        negative_prompt: str | None = None,
+        aspect_ratio: str = "2:3",
+        num_inference_steps: int = 28,
+        guidance_scale: float = 3.5,
+    ) -> T2IGenerationResult:
+        try:
+            import fal_client
+        except ImportError as exc:
+            raise RuntimeError("fal-client not installed. Run: pip install fal-client") from exc
+
+        endpoint = self.KONTEXT_ENDPOINT if image_url else self.TEXT_ENDPOINT
+        args: dict = {
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+        }
+        if image_url:
+            args["image_url"] = image_url
+        if negative_prompt:
+            args["negative_prompt"] = negative_prompt
+
+        logger.info(
+            "FLUX generate — endpoint=%s, prompt_tokens=%s, image_url=%s",
+            endpoint,
+            len(prompt.split()),
+            "yes" if image_url else "no",
         )
 
-    async def generate(self, request: T2IRequest) -> T2IResult:
-        if not self.is_available():
-            raise RuntimeError("FluxProvider: no API key configured (FAL_API_KEY or REPLICATE_API_KEY)")
+        result = await fal_client.run_async(endpoint, arguments=args)
+        image_data = result["images"][0]
 
-        logger.info("FluxProvider.generate called — stub, no image generated yet")
-        # TODO: implement fal.ai / Replicate call in T2I generation sprint
-        return T2IResult(
-            image_url="",
-            image_path="",
-            provider=self.name,
-            prompt_used=request.prompt,
+        return T2IGenerationResult(
+            url=image_data["url"],
+            width=image_data.get("width"),
+            height=image_data.get("height"),
+            model=endpoint,
+            prompt_used=prompt,
+            provider="flux_kontext" if image_url else "flux_pro",
         )

@@ -19,6 +19,8 @@ export default function WorkflowLayout() {
         ctx.setBook(b);
         if (b.well_known_book_title != null) ctx.setWellKnownBookTitle(b.well_known_book_title);
         if (b.similar_book_title != null) ctx.setSimilarBookTitle(b.similar_book_title);
+        const mode = (b as { analysis_mode?: string | null }).analysis_mode;
+        ctx.setWorkflowType(mode === 'simple' ? 'cover_only' : 'full_book');
         return getVisualBible(b.id).catch(() => null);
       })
       .then((data) => {

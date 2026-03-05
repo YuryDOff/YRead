@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, MapPin, Film, Search, Loader2, ArrowLeft, Star, ChevronDown, ChevronUp, Tag, Sparkles, Package, Bookmark, Palette, Pencil, X } from 'lucide-react';
+import { Users, MapPin, Film, Search, Loader2, ArrowLeft, Star, User, ChevronDown, ChevronUp, Tag, Sparkles, Package, Bookmark, Palette, Pencil, X } from 'lucide-react';
 import { useBook } from '../context/BookContext';
 import {
   getCharacters,
@@ -20,6 +20,7 @@ import {
   type Artefact,
   type CoverAnalysisResponse,
 } from '../services/api';
+import CoverBriefEditor from '../components/CoverBriefEditor';
 
 type Tab = 'characters' | 'locations' | 'scenes' | 'artefacts' | 'cover' | 'style';
 
@@ -36,7 +37,12 @@ export default function AnalysisReviewPage() {
   const [charMainFlags, setCharMainFlags] = useState<Record<number, boolean>>({});
   const [locMainFlags, setLocMainFlags] = useState<Record<number, boolean>>({});
   const [artefactMainFlags, setArtefactMainFlags] = useState<Record<number, boolean>>({});
+  const [refChar, setRefChar] = useState<Record<number, boolean>>({});
+  const [refLoc, setRefLoc] = useState<Record<number, boolean>>({});
+  const [refArtefact, setRefArtefact] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(true);
+
+  const analysisMode = (ctx.book && (ctx.book as { analysis_mode?: string }).analysis_mode === 'simple') ? 'simple' : 'pro';
   const [searching, setSearching] = useState(false);
   const [reanalyzing, setReanalyzing] = useState<string | null>(null);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
@@ -75,6 +81,16 @@ export default function AnalysisReviewPage() {
         const aFlags: Record<number, boolean> = {};
         for (const a of arts) aFlags[a.id] = a.is_main === 1;
         setArtefactMainFlags(aFlags);
+
+        const rChar: Record<number, boolean> = {};
+        for (const c of chars) rChar[c.id] = (c as Character & { is_selected_for_reference?: number }).is_selected_for_reference === 1;
+        setRefChar(rChar);
+        const rLoc: Record<number, boolean> = {};
+        for (const l of locs) rLoc[l.id] = (l as Location & { is_selected_for_reference?: number }).is_selected_for_reference === 1;
+        setRefLoc(rLoc);
+        const rArt: Record<number, boolean> = {};
+        for (const a of arts) rArt[a.id] = (a as Artefact & { is_selected_for_reference?: number }).is_selected_for_reference === 1;
+        setRefArtefact(rArt);
       } catch (err) {
         console.error('Failed to load analysis results', err);
       } finally {
@@ -85,16 +101,14 @@ export default function AnalysisReviewPage() {
     load();
   }, [ctx.book, navigate]);
 
-  function toggleChar(id: number) {
-    setCharMainFlags((prev) => ({ ...prev, [id]: !prev[id] }));
+  function toggleRefChar(id: number) {
+    setRefChar((prev) => ({ ...prev, [id]: !prev[id] }));
   }
-
-  function toggleLoc(id: number) {
-    setLocMainFlags((prev) => ({ ...prev, [id]: !prev[id] }));
+  function toggleRefLoc(id: number) {
+    setRefLoc((prev) => ({ ...prev, [id]: !prev[id] }));
   }
-
-  function toggleArtefact(id: number) {
-    setArtefactMainFlags((prev) => ({ ...prev, [id]: !prev[id] }));
+  function toggleRefArtefact(id: number) {
+    setRefArtefact((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   const handleToggleScene = useCallback(async (sceneId: number) => {
@@ -125,9 +139,9 @@ export default function AnalysisReviewPage() {
     }
   }, [ctx.book]);
 
-  const selectedCharCount = Object.values(charMainFlags).filter(Boolean).length;
-  const selectedLocCount = Object.values(locMainFlags).filter(Boolean).length;
-  const selectedArtefactCount = Object.values(artefactMainFlags).filter(Boolean).length;
+  const selectedCharCount = Object.values(refChar).filter(Boolean).length;
+  const selectedLocCount = Object.values(refLoc).filter(Boolean).length;
+  const selectedArtefactCount = Object.values(refArtefact).filter(Boolean).length;
   const selectedSceneCount = scenes.filter((s) => s.is_selected).length;
 
   async function handleReanalyzeEntity(entityType: string) {
@@ -144,7 +158,7 @@ export default function AnalysisReviewPage() {
     }
   }
 
-  async function handlePrepareSearch() {
+  async function handleContinueMoodBoard() {
     if (!ctx.book) return;
     setSearching(true);
     try {
@@ -153,13 +167,34 @@ export default function AnalysisReviewPage() {
           id: c.id,
           is_main: !!charMainFlags[c.id],
         })),
+        locations: [],
+        artefacts: [],
+      });
+      navigate(`/books/${ctx.book.id}/mood-board`);
+    } catch (err) {
+      console.error('Failed to save selections', err);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handlePrepareSearch() {
+    if (!ctx.book) return;
+    setSearching(true);
+    try {
+      await updateEntitySelections(ctx.book.id, {
+        characters: characters.map((c) => ({
+          id: c.id,
+          is_main: !!refChar[c.id],
+        })),
         locations: locations.map((l) => ({
           id: l.id,
-          is_main: !!locMainFlags[l.id],
+          is_main: !!refLoc[l.id],
         })),
         artefacts: artefacts.map((a) => ({
           id: a.id,
-          is_main: !!artefactMainFlags[a.id],
+          is_main: !!refArtefact[a.id],
         })),
       });
       navigate(`/books/${ctx.book.id}/review-search`);
@@ -179,14 +214,17 @@ export default function AnalysisReviewPage() {
     );
   }
 
-  const TABS: { id: Tab; label: string; count: number; icon: typeof Users }[] = [
+  const allTabs: { id: Tab; label: string; count: number; icon: typeof Users }[] = [
     { id: 'characters', label: 'Characters', count: selectedCharCount, icon: Users },
     { id: 'locations', label: 'Locations', count: selectedLocCount, icon: MapPin },
     { id: 'artefacts', label: 'Artefacts', count: selectedArtefactCount, icon: Package },
     { id: 'scenes', label: 'Scenes', count: selectedSceneCount, icon: Film },
-    { id: 'cover', label: 'Cover / Title', count: coverAnalysis ? 1 : 0, icon: Bookmark },
+    { id: 'cover', label: 'Cover', count: coverAnalysis ? 1 : 0, icon: Bookmark },
     { id: 'style', label: 'Style', count: coverAnalysis ? 1 : 0, icon: Palette },
   ];
+  const TABS = analysisMode === 'simple'
+    ? allTabs.filter((t) => t.id === 'characters')
+    : allTabs.filter((t) => t.id === 'characters' || t.id === 'locations' || t.id === 'artefacts' || t.id === 'cover');
 
   return (
     <div className="min-h-screen bg-paper-cream px-4 py-12">
@@ -204,10 +242,12 @@ export default function AnalysisReviewPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-sepia/20 gap-1">
+        <div className="flex border-b border-sepia/20 gap-1" data-testid="analysis-review-tabs">
           {TABS.map(({ id, label, count, icon: Icon }) => (
             <button
               key={id}
+              role="tab"
+              aria-label={label}
               onClick={() => setActiveTab(id)}
               className={`flex items-center gap-2 px-4 py-2.5 font-ui text-sm transition-colors
                 cursor-pointer border-b-2 -mb-px
@@ -217,7 +257,10 @@ export default function AnalysisReviewPage() {
             >
               <Icon size={16} />
               {label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === id ? 'bg-golden/20 text-golden' : 'bg-sepia/10 text-sepia'}`}>
+              <span
+                title={id === 'characters' ? 'Characters selected for reference image search' : id === 'locations' ? 'Locations selected for reference search' : id === 'artefacts' ? 'Artefacts selected for reference search' : id === 'scenes' ? 'Scenes selected for illustration' : undefined}
+                className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === id ? 'bg-golden/20 text-golden' : 'bg-sepia/10 text-sepia'}`}
+              >
                 {count}
               </span>
             </button>
@@ -236,7 +279,8 @@ export default function AnalysisReviewPage() {
                   key={c.id}
                   character={c}
                   isMain={!!charMainFlags[c.id]}
-                  onToggle={() => toggleChar(c.id)}
+                  isSelectedForRef={!!refChar[c.id]}
+                  onToggleRef={() => toggleRefChar(c.id)}
                   isEditing={editingEntityId === `char-${c.id}`}
                   editDraft={editingEntityId === `char-${c.id}` ? editDraft : null}
                   onEdit={() => {
@@ -253,11 +297,37 @@ export default function AnalysisReviewPage() {
                     if (!ctx.book) return;
                     setEditError(null);
                     try {
+                      const coreArr = data.core_tokens
+                        ? data.core_tokens.split(',').map((s: string) => s.trim()).filter(Boolean)
+                        : undefined;
+                      const styleArr = data.style_tokens
+                        ? data.style_tokens.split(',').map((s: string) => s.trim()).filter(Boolean)
+                        : undefined;
+                      const { core_tokens: _ct, style_tokens: _st, ...rest } = data;
+                      const payload: Record<string, unknown> = { id: c.id, ...rest };
+                      if (coreArr !== undefined || styleArr !== undefined) {
+                        payload.entity_visual_tokens = {
+                          ...(character.entity_visual_tokens ?? {}),
+                          ...(coreArr !== undefined && { core_tokens: coreArr }),
+                          ...(styleArr !== undefined && { style_tokens: styleArr }),
+                        };
+                      }
                       await patchEntitySummaries(ctx.book.id, {
-                        characters: [{ id: c.id, ...data }],
+                        characters: [payload],
                         locations: [],
                       });
-                      setCharacters((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...data } : x)));
+                      setCharacters((prev) =>
+                        prev.map((x) =>
+                          x.id === c.id
+                            ? {
+                                ...x,
+                                ...rest,
+                                entity_visual_tokens:
+                                  (payload.entity_visual_tokens as Character['entity_visual_tokens']) ?? x.entity_visual_tokens,
+                              }
+                            : x
+                        )
+                      );
                       setEditingEntityId(null);
                       setEditDraft(null);
                     } catch (err) {
@@ -285,7 +355,8 @@ export default function AnalysisReviewPage() {
                   key={l.id}
                   location={l}
                   isMain={!!locMainFlags[l.id]}
-                  onToggle={() => toggleLoc(l.id)}
+                  isSelectedForRef={!!refLoc[l.id]}
+                  onToggleRef={() => toggleRefLoc(l.id)}
                   isEditing={editingEntityId === `loc-${l.id}`}
                   editDraft={editingEntityId === `loc-${l.id}` ? editDraft : null}
                   onEdit={() => {
@@ -364,7 +435,8 @@ export default function AnalysisReviewPage() {
                     key={a.id}
                     artefact={a}
                     isMain={!!artefactMainFlags[a.id]}
-                    onToggle={() => toggleArtefact(a.id)}
+                    isSelectedForRef={!!refArtefact[a.id]}
+                    onToggleRef={() => toggleRefArtefact(a.id)}
                     isEditing={editingEntityId === `art-${a.id}`}
                     editDraft={editingEntityId === `art-${a.id}` ? editDraft : null}
                     onEdit={() => {
@@ -399,15 +471,15 @@ export default function AnalysisReviewPage() {
           </section>
         )}
 
-        {/* Cover / Title analysis tab (7.6.2 editable) */}
-        {activeTab === 'cover' && (
-          <CoverTab
+        {/* Cover tab: CoverBriefEditor (Phase 11) */}
+        {activeTab === 'cover' && ctx.book && (
+          <CoverBriefEditor
+            bookId={ctx.book.id}
+            analysisMode={analysisMode}
             coverAnalysis={coverAnalysis}
-            onSave={async (data) => {
-              if (!ctx.book) return;
-              const updated = await updateCoverAnalysis(ctx.book.id, data);
-              setCoverAnalysis(updated);
-            }}
+            characters={characters}
+            locations={locations}
+            artefacts={artefacts}
           />
         )}
 
@@ -464,26 +536,37 @@ export default function AnalysisReviewPage() {
             Back
           </button>
 
-          <button
-            onClick={handlePrepareSearch}
-            disabled={searching || (selectedCharCount === 0 && selectedLocCount === 0 && selectedArtefactCount === 0)}
-            className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg
-                       font-ui font-semibold text-paper-cream bg-midnight
-                       hover:bg-midnight/90 disabled:opacity-40 disabled:cursor-not-allowed
-                       transition-colors shadow cursor-pointer"
-          >
-            {searching ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Search size={18} />
-                Prepare reference search ({selectedCharCount + selectedLocCount + selectedArtefactCount} entities)
-              </>
-            )}
-          </button>
+          {analysisMode === 'simple' ? (
+            <button
+              onClick={handleContinueMoodBoard}
+              disabled={searching}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg
+                         font-ui font-semibold text-paper-cream bg-midnight
+                         hover:bg-midnight/90 disabled:opacity-40 disabled:cursor-not-allowed
+                         transition-colors shadow cursor-pointer"
+            >
+              {searching ? (
+                <><Loader2 size={18} className="animate-spin" />Saving…</>
+              ) : (
+                'Continue to Mood Board'
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handlePrepareSearch}
+              disabled={searching || (selectedCharCount === 0 && selectedLocCount === 0 && selectedArtefactCount === 0)}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg
+                         font-ui font-semibold text-paper-cream bg-midnight
+                         hover:bg-midnight/90 disabled:opacity-40 disabled:cursor-not-allowed
+                         transition-colors shadow cursor-pointer"
+            >
+              {searching ? (
+                <><Loader2 size={18} className="animate-spin" />Saving…</>
+              ) : (
+                <><Search size={18} />Prepare reference search ({selectedCharCount + selectedLocCount + selectedArtefactCount} entities)</>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -790,7 +873,8 @@ function StyleTab({
 function CharacterCard({
   character,
   isMain,
-  onToggle,
+  isSelectedForRef,
+  onToggleRef,
   isEditing,
   editDraft,
   onEdit,
@@ -801,7 +885,8 @@ function CharacterCard({
 }: {
   character: Character;
   isMain: boolean;
-  onToggle: () => void;
+  isSelectedForRef: boolean;
+  onToggleRef: () => void;
   isEditing?: boolean;
   editDraft?: Record<string, string> | null;
   onEdit?: () => void;
@@ -835,6 +920,20 @@ function CharacterCard({
             <textarea value={draft.full_description ?? ''} onChange={(e) => onDraftChange?.('full_description', e.target.value)} rows={2} className="w-full px-2 py-1 rounded border border-sepia/20 text-xs" />
             <label className="block font-ui text-xs text-sepia">Personality traits (comma-separated)</label>
             <input value={draft.personality_traits ?? ''} onChange={(e) => onDraftChange?.('personality_traits', e.target.value)} className="w-full px-2 py-1 rounded border border-sepia/20 text-sm" />
+            <label className="block font-ui text-xs text-sepia">Core tokens (comma-separated)</label>
+            <input
+              value={draft.core_tokens ?? (character.entity_visual_tokens?.core_tokens ?? []).join(', ')}
+              onChange={(e) => onDraftChange?.('core_tokens', e.target.value)}
+              className="w-full px-2 py-1 rounded border border-sepia/20 text-sm font-ui"
+              placeholder="e.g. red-haired woman, emerald eyes, scholar's robes"
+            />
+            <label className="block font-ui text-xs text-sepia">Style tokens (comma-separated)</label>
+            <input
+              value={draft.style_tokens ?? (character.entity_visual_tokens?.style_tokens ?? []).join(', ')}
+              onChange={(e) => onDraftChange?.('style_tokens', e.target.value)}
+              className="w-full px-2 py-1 rounded border border-sepia/20 text-sm font-ui"
+              placeholder="e.g. pre-Raphaelite, ethereal, painterly"
+            />
             {editError && <p className="font-ui text-xs text-red-600">{editError}</p>}
             <div className="flex gap-2 pt-2">
               <button type="button" onClick={onCancel} className="px-3 py-1.5 rounded font-ui text-xs border border-sepia/20">Cancel</button>
@@ -848,19 +947,36 @@ function CharacterCard({
 
   return (
     <div
-      onClick={onToggle}
-      className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50 hover:border-golden/40'
+      className={`p-4 rounded-xl border-2 transition-all ${
+        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50'
       }`}
     >
       <div className="flex items-start gap-3">
-        <Star
-          size={20}
-          className={`mt-0.5 flex-shrink-0 transition-colors ${isMain ? 'text-golden fill-golden' : 'text-sepia/30'}`}
-        />
+        {isMain && (
+          <span className="mt-0.5 flex-shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-xs font-ui font-medium bg-golden/20 text-golden" aria-hidden>
+            <Star size={12} fill="currentColor" />
+            Main
+          </span>
+        )}
+        {!isMain && (
+          <span className="mt-0.5 flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-ui text-sepia/60 bg-sepia/5">
+            <User size={11} />
+            Secondary
+          </span>
+        )}
         <div className="flex-1 space-y-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="block font-ui text-sm font-semibold text-charcoal">{character.name}</span>
+            <label className="flex items-center gap-2 cursor-pointer font-ui text-xs text-sepia">
+              <input
+                type="checkbox"
+                checked={isSelectedForRef}
+                onChange={() => onToggleRef()}
+                className="rounded border-sepia/30"
+                aria-label="Use as reference"
+              />
+              Use as reference
+            </label>
             {onEdit && (
               <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1 rounded text-sepia hover:bg-golden/20 hover:text-golden" title="Edit"><Pencil size={14} /></button>
             )}
@@ -872,7 +988,7 @@ function CharacterCard({
             <p className="font-ui text-xs text-sepia/70">Traits: {character.personality_traits}</p>
           )}
           {hasDetails && (
-            <EntitySection title="Онтология и визуальные данные" defaultOpen={false}>
+            <EntitySection title="Visual Data" defaultOpen={false}>
               {(onto?.entity_class || onto?.search_archetype) && (
                 <div className="flex flex-wrap gap-1">
                   {onto.entity_class && (
@@ -888,7 +1004,7 @@ function CharacterCard({
                 </div>
               )}
               {character.visual_type && (
-                <p className="font-ui text-xs text-sepia">Тип: {character.visual_type}</p>
+                <p className="font-ui text-xs text-sepia">Type: {character.visual_type}</p>
               )}
               {onto?.visual_markers?.length ? (
                 <div className="flex flex-wrap gap-1">
@@ -900,7 +1016,7 @@ function CharacterCard({
                 </div>
               ) : null}
               {character.typical_emotions && (
-                <p className="font-ui text-xs text-sepia/80">Эмоции: {character.typical_emotions}</p>
+                <p className="font-ui text-xs text-sepia/80">Emotions: {character.typical_emotions}</p>
               )}
               {(tokens?.core_tokens?.length || tokens?.style_tokens?.length || tokens?.archetype_tokens?.length) ? (
                 <div className="space-y-1">
@@ -913,18 +1029,18 @@ function CharacterCard({
                     </div>
                   ) : null}
                   {tokens.style_tokens?.length ? (
-                    <p className="font-ui text-xs text-sepia/80">Стиль: {tokens.style_tokens.join(', ')}</p>
+                    <p className="font-ui text-xs text-sepia/80">Style tokens: {tokens.style_tokens.join(', ')}</p>
                   ) : null}
                   {tokens.archetype_tokens?.length ? (
-                    <p className="font-ui text-xs text-sepia/80">Архетип: {tokens.archetype_tokens.join(', ')}</p>
+                    <p className="font-ui text-xs text-sepia/80">Archetype: {tokens.archetype_tokens.join(', ')}</p>
                   ) : null}
                 </div>
               ) : null}
               {character.search_visual_analog && (
-                <p className="font-ui text-xs text-sepia/80 italic">Аналог для поиска: {character.search_visual_analog}</p>
+                <p className="font-ui text-xs text-sepia/80 italic">Search analog: {character.search_visual_analog}</p>
               )}
               {(character.is_well_known_entity && character.canonical_search_name) && (
-                <p className="font-ui text-xs text-sepia/80">Известная сущность: {character.canonical_search_name}</p>
+                <p className="font-ui text-xs text-sepia/80">Known entity: {character.canonical_search_name}</p>
               )}
             </EntitySection>
           )}
@@ -937,7 +1053,8 @@ function CharacterCard({
 function LocationCard({
   location,
   isMain,
-  onToggle,
+  isSelectedForRef,
+  onToggleRef,
   isEditing,
   editDraft,
   onEdit,
@@ -948,7 +1065,8 @@ function LocationCard({
 }: {
   location: Location;
   isMain: boolean;
-  onToggle: () => void;
+  isSelectedForRef: boolean;
+  onToggleRef: () => void;
   isEditing?: boolean;
   editDraft?: Record<string, string> | null;
   onEdit?: () => void;
@@ -993,19 +1111,27 @@ function LocationCard({
 
   return (
     <div
-      onClick={onToggle}
-      className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50 hover:border-golden/40'
+      className={`p-4 rounded-xl border-2 transition-all ${
+        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50'
       }`}
     >
       <div className="flex items-start gap-3">
-        <Star
-          size={20}
-          className={`mt-0.5 flex-shrink-0 transition-colors ${isMain ? 'text-golden fill-golden' : 'text-sepia/30'}`}
-        />
+        {isMain && (
+          <span className="mt-0.5 flex-shrink-0 px-2 py-0.5 rounded text-xs font-ui font-medium bg-golden/20 text-golden" aria-hidden>Main</span>
+        )}
         <div className="flex-1 space-y-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="block font-ui text-sm font-semibold text-charcoal">{location.name}</span>
+            <label className="flex items-center gap-2 cursor-pointer font-ui text-xs text-sepia">
+              <input
+                type="checkbox"
+                checked={isSelectedForRef}
+                onChange={() => onToggleRef()}
+                className="rounded border-sepia/30"
+                aria-label="Use as reference"
+              />
+              Use as reference
+            </label>
             {onEdit && (
               <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1 rounded text-sepia hover:bg-golden/20 hover:text-golden" title="Edit"><Pencil size={14} /></button>
             )}
@@ -1017,7 +1143,7 @@ function LocationCard({
             <p className="font-ui text-xs text-sepia/70">Atmosphere: {location.atmosphere}</p>
           )}
           {hasDetails && (
-            <EntitySection title="Онтология и визуальные данные" defaultOpen={false}>
+            <EntitySection title="Visual Data" defaultOpen={false}>
               {(onto?.entity_class || onto?.search_archetype) && (
                 <div className="flex flex-wrap gap-1">
                   {onto.entity_class && (
@@ -1048,15 +1174,15 @@ function LocationCard({
                     </div>
                   ) : null}
                   {tokens.style_tokens?.length ? (
-                    <p className="font-ui text-xs text-sepia/80">Стиль: {tokens.style_tokens.join(', ')}</p>
+                    <p className="font-ui text-xs text-sepia/80">Style tokens: {tokens.style_tokens.join(', ')}</p>
                   ) : null}
                 </div>
               ) : null}
               {location.search_visual_analog && (
-                <p className="font-ui text-xs text-sepia/80 italic">Аналог для поиска: {location.search_visual_analog}</p>
+                <p className="font-ui text-xs text-sepia/80 italic">Search analog: {location.search_visual_analog}</p>
               )}
               {(location.is_well_known_entity && location.canonical_search_name) && (
-                <p className="font-ui text-xs text-sepia/80">Известная сущность: {location.canonical_search_name}</p>
+                <p className="font-ui text-xs text-sepia/80">Known entity: {location.canonical_search_name}</p>
               )}
             </EntitySection>
           )}
@@ -1069,7 +1195,8 @@ function LocationCard({
 function ArtefactCard({
   artefact,
   isMain,
-  onToggle,
+  isSelectedForRef,
+  onToggleRef,
   isEditing,
   editDraft,
   onEdit,
@@ -1080,7 +1207,8 @@ function ArtefactCard({
 }: {
   artefact: Artefact;
   isMain: boolean;
-  onToggle: () => void;
+  isSelectedForRef: boolean;
+  onToggleRef: () => void;
   isEditing?: boolean;
   editDraft?: Record<string, string> | null;
   onEdit?: () => void;
@@ -1118,16 +1246,27 @@ function ArtefactCard({
 
   return (
     <div
-      onClick={onToggle}
-      className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50 hover:border-golden/40'
+      className={`p-4 rounded-xl border-2 transition-all ${
+        isMain ? 'border-golden bg-golden/10 shadow-sm' : 'border-sepia/15 bg-white/50'
       }`}
     >
       <div className="flex items-start gap-3">
-        <Star size={20} className={`mt-0.5 flex-shrink-0 ${isMain ? 'text-golden fill-golden' : 'text-sepia/30'}`} />
+        {isMain && (
+          <span className="mt-0.5 flex-shrink-0 px-2 py-0.5 rounded text-xs font-ui font-medium bg-golden/20 text-golden" aria-hidden>Main</span>
+        )}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="block font-ui text-sm font-semibold text-charcoal">{artefact.name}</span>
+            <label className="flex items-center gap-2 cursor-pointer font-ui text-xs text-sepia">
+              <input
+                type="checkbox"
+                checked={isSelectedForRef}
+                onChange={() => onToggleRef()}
+                className="rounded border-sepia/30"
+                aria-label="Use as reference"
+              />
+              Use as reference
+            </label>
             {onEdit && (
               <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-1 rounded text-sepia hover:bg-golden/20 hover:text-golden" title="Edit"><Pencil size={14} /></button>
             )}

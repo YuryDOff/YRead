@@ -374,7 +374,7 @@ def extract_scenes_llm(
         })
 
     # If LLM returned fewer scenes than requested, pad with fallbacks from candidates
-    if len(validated) < scene_count:
+    if len(validated) < min_scenes:
         fallbacks = _build_scene_fallbacks(candidates, max_scenes - len(validated))
         validated.extend(fallbacks)
 

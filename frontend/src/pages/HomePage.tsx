@@ -92,7 +92,7 @@ export default function HomePage() {
       {/* Hero */}
       <div className="max-w-2xl text-center space-y-8">
         <h1 className="font-display text-5xl md:text-6xl font-bold text-charcoal leading-tight">
-          StoryForge<br />
+          Noctua<br />
           <span className="text-golden">AI</span>
         </h1>
 

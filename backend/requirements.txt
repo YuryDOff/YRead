@@ -13,3 +13,4 @@ python-multipart
 python-docx
 PyPDF2
 langdetect
+fal-client>=0.10.0

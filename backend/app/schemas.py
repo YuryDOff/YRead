@@ -19,6 +19,13 @@ class BookUpdateRequest(BaseModel):
     search_query_strategy: Optional[str] = None
 
 
+class BookCreate(BaseModel):
+    """Request body for POST /api/books."""
+    title: str
+    author: Optional[str] = None
+    analysis_mode: Literal["simple", "pro"] = "pro"
+
+
 class BookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,6 +42,7 @@ class BookResponse(BaseModel):
     entity_activations: Optional[list[str]] = None
     genre: Optional[str] = None
     workflow_type: Optional[str] = None
+    analysis_mode: Optional[str] = "pro"
     scene_display_count: int = 10
     target_audience: str = "adult"
     search_query_strategy: str = "tokens"
@@ -478,6 +486,30 @@ class ArtefactResponse(BaseModel):
 # Cover Analysis
 # ---------------------------------------------------------------------------
 
+class I2TAnalysisResult(BaseModel):
+    """Result of GPT-4o Vision I2T extraction from a reference cover image."""
+    style_template: str
+    composition_notes: str
+    color_palette_extracted: dict  # keys: dominant, accent, temperature, contrast
+    style_tags: list[str]
+    mood_keywords: list[str]
+    lighting_description: str
+
+
+class AnalyzeCoverReferenceRequest(BaseModel):
+    """Request body for POST /api/books/{book_id}/analyze-cover-reference."""
+    image_url: str
+    mode: Literal["cover", "illustration"] = "cover"
+
+
+class PromptEngineeringResult(BaseModel):
+    """Result of merging I2T style_template with entity visual tokens (GPT-4o)."""
+    final_prompt: str
+    negative_prompt: str
+    compatibility_status: Literal["COMPATIBLE", "WARNING", "INCOMPATIBLE"]
+    compatibility_note: str
+
+
 class CoverAnalysisResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -503,6 +535,9 @@ class CoverAnalysisResponse(BaseModel):
     primary_cover_location_id: Optional[int] = None
     primary_cover_artefact_id: Optional[int] = None
     full_description: Optional[str] = None
+    reference_style_template: Optional[str] = None  # I2T result (Phase 8b)
+    reference_style_notes: Optional[dict] = None
+    reference_image_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -520,6 +555,7 @@ class CoverAnalysisResponse(BaseModel):
                 ("cover_role_location_ids", "cover_role_location_ids"),
                 ("cover_role_artefact_ids", "cover_role_artefact_ids"),
                 ("color_palette_structured", "color_palette_structured"),
+                ("reference_style_notes", "reference_style_notes"),
             ):
                 raw = getattr(values, attr, None)
                 if raw is not None and isinstance(raw, str):
@@ -615,6 +651,7 @@ class CoverConceptGenerateRequest(BaseModel):
     negative_prompt: Optional[str] = None
     style_variant: Optional[str] = None  # photographic|illustrated|abstract|typographic
     concept_count: int = 3
+    user_instruction: Optional[str] = None  # for PromptEngineeringService merge (Phase 13)
 
 
 class CoverConceptPatchRequest(BaseModel):

@@ -138,6 +138,13 @@ class Book(Base):
     known_adaptations_json = Column(Text, nullable=True)
     entity_activations = Column(Text, nullable=True)  # JSON array e.g. ["cover", "characters"]
     genre = Column(Text, nullable=True)  # e.g. fantasy, sci-fi, thriller
+    analysis_mode = Column(
+        String(20),
+        nullable=False,
+        default="pro",
+        server_default="pro",
+        comment="'simple' = Book Cover mode (characters only). 'pro' = Full Book (all entities).",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -369,6 +376,9 @@ class CoverAnalysis(Base):
     primary_cover_location_id = Column(Integer, nullable=True)
     primary_cover_artefact_id = Column(Integer, nullable=True)
     full_description = Column(Text, nullable=True)  # Full narrative description for search/generation prompts
+    reference_style_template = Column(Text, nullable=True)  # T2I prompt string from GPT-4o Vision I2T
+    reference_style_notes = Column(Text, nullable=True)  # JSON: composition_notes, color_palette, style_tags, etc.
+    reference_image_url = Column(String(2048), nullable=True)  # URL of reference cover analysed
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

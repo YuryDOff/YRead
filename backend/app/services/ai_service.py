@@ -42,13 +42,17 @@ INTERNAL_MONOLOGUE_MARKERS = {"thought", "wondered", "remembered", "pondered", "
 _client: Optional[OpenAI] = None
 
 
+# Timeout for LLM calls (seconds); prevents indefinite hang if API blocks
+OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "180"))
+
+
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY environment variable is not set")
-        _client = OpenAI(api_key=api_key)
+        _client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT)
     return _client
 
 
@@ -432,6 +436,8 @@ def _build_entity_token_fallbacks(entities: list[dict]) -> list[dict]:
 # different secondary characters due to model non-determinism.
 MAX_MAIN_CHARACTERS = 5
 MAX_MAIN_LOCATIONS = 5
+# Simple mode: extract all characters (no cap) so author can select any for cover
+MAX_MAIN_CHARACTERS_SIMPLE = 10
 
 CONSOLIDATION_PROMPT = """\
 Given these character and location extractions from multiple sections of a book, consolidate into:
@@ -442,6 +448,76 @@ LANGUAGE RULES (mandatory):
 - For EVERY character and location set "canonical_search_name" in ENGLISH: for well-known entities use the standard English name (e.g. "Napoleon", "Sherlock Holmes", "Easter Island"); for others use English transliteration or translation of the name (e.g. "Ivan" → "Ivan", "Москва" → "Moscow") so that image search and APIs can use it. Never leave canonical_search_name null — always provide an English form.
 
 1. Top 5 MAIN CHARACTERS (most frequently mentioned, most important to plot; pick consistently by mention frequency to reduce variance between re-runs)
+   - Merge duplicate descriptions into comprehensive profiles
+   - Create detailed physical descriptions (in English)
+   - Identify 2 most characteristic emotions for each
+   - Mark EXACTLY ONE character as "is_main": true — the single most important protagonist
+   - All other characters must have "is_main": false
+   - For each character set "visual_type" to exactly one of: "man", "woman", "animal", "AI", "alien", "creature" (based on physical description and context)
+   - If the character is a real or well-known person/entity (historical, celebrity, famous fictional with established look), set "is_well_known_entity": true and "canonical_search_name" to the standard English name for image search (e.g. "Napoleon", "Sherlock Holmes"); otherwise "is_well_known_entity": false and "canonical_search_name" to English transliteration/translation of the name
+   - For fictional characters with is_well_known_entity false, set "search_visual_analog" to a short phrase of real-world visual keywords in English (e.g. "young woman red hair green eyes medieval dress")
+
+2. Top 5 MAIN LOCATIONS (most important to story)
+   - Merge duplicate descriptions; write all in English
+   - Create comprehensive visual descriptions (in English)
+   - Mark EXACTLY ONE location as "is_main": true — the single most important/frequent location
+   - All other locations must have "is_main": false
+   - If the location is real or well-known (e.g. Easter Island, Paris, Mount Everest), set "is_well_known_entity": true and "canonical_search_name" to the standard English name; otherwise "is_well_known_entity": false and "canonical_search_name" to English transliteration/translation of the location name
+   - For fictional locations with is_well_known_entity false, set "search_visual_analog" to real-world visual keywords in English (e.g. "tropical island ancient stone statues ocean cliffs")
+
+3. OVERALL TONE & STYLE
+   - Genre classification
+   - Narrative mood
+   - Visual style recommendation for illustrations
+
+4. KNOWN ADAPTATIONS (only when is_well_known_book = true)
+   - List known film/TV/animation adaptations as: "Title Year format"  (max 3, empty array if none)
+   - Examples: "I Robot 2004 film", "BBC miniseries 2003", "Disney animation 1991"
+
+Return ONLY valid JSON:
+{
+  "main_characters": [
+    {
+      "name": "",
+      "physical_description": "",
+      "personality_traits": "",
+      "typical_emotions": ["", ""],
+      "is_main": false,
+      "visual_type": "woman",
+      "is_well_known_entity": false,
+      "canonical_search_name": "English name or transliteration",
+      "search_visual_analog": ""
+    }
+  ],
+  "main_locations": [
+    {
+      "name": "",
+      "visual_description": "",
+      "atmosphere": "",
+      "is_main": false,
+      "is_well_known_entity": false,
+      "canonical_search_name": "English name or transliteration",
+      "search_visual_analog": ""
+    }
+  ],
+  "tone_and_style": {
+    "genre": "",
+    "mood": "",
+    "visual_style": ""
+  },
+  "known_adaptations": []
+}
+"""
+
+CONSOLIDATION_PROMPT_SIMPLE = """\
+Given these character and location extractions from multiple sections of a book, consolidate into:
+
+LANGUAGE RULES (mandatory):
+- Write ALL of the following in ENGLISH only (they are stored and used for image search and T2I): physical_description, personality_traits, visual_description, atmosphere, search_visual_analog.
+- Keep "name" in the ORIGINAL language as in the manuscript (e.g. Russian names stay in Russian).
+- For EVERY character and location set "canonical_search_name" in ENGLISH: for well-known entities use the standard English name (e.g. "Napoleon", "Sherlock Holmes", "Easter Island"); for others use English transliteration or translation of the name (e.g. "Ivan" → "Ivan", "Москва" → "Moscow") so that image search and APIs can use it. Never leave canonical_search_name null — always provide an English form.
+
+1. ALL MAIN CHARACTERS — extract every named character who appears more than once (no limit; cover generation requires the full cast). Mark the single most important protagonist as is_main: true, all others as is_main: false.
    - Merge duplicate descriptions into comprehensive profiles
    - Create detailed physical descriptions (in English)
    - Identify 2 most characteristic emotions for each
@@ -564,6 +640,7 @@ def consolidate_results(
     all_batch_results: list[dict],
     is_well_known_book: bool = False,
     run_id: Optional[str] = None,
+    analysis_mode: str = "pro",
 ) -> dict:
     """
     Take all batch results and consolidate characters/locations into
@@ -572,8 +649,10 @@ def consolidate_results(
     When is_well_known_book=True, the prompt instructs the model to also
     populate known_adaptations (film/TV/animation adaptations list).
     *run_id*: optional unique id for this run; appended to the prompt to reduce cache hits.
+    *analysis_mode*: "simple" uses CONSOLIDATION_PROMPT_SIMPLE (all characters, no 5-cap); "pro" uses CONSOLIDATION_PROMPT.
     """
     client = _get_client()
+    prompt = CONSOLIDATION_PROMPT_SIMPLE if analysis_mode == "simple" else CONSOLIDATION_PROMPT
 
     # Gather all characters & locations across batches
     all_chars: list[dict] = []
@@ -596,7 +675,7 @@ def consolidate_results(
         model=MODEL,
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": CONSOLIDATION_PROMPT},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": user_content},
         ],
         temperature=0.3,
@@ -622,6 +701,20 @@ def consolidate_results(
 # Full analysis pipeline
 # ---------------------------------------------------------------------------
 
+def get_entity_types_for_mode(analysis_mode: str, requested_types: list[str]) -> list[str]:
+    """
+    Simple mode: characters (for cover brief) plus cover if requested, so the pipeline
+    runs both run_full_analysis and run_cover_analysis and progress completes.
+    Pro mode: extracts all requested_types (existing behaviour).
+    """
+    if analysis_mode == "simple":
+        out = ["character"]
+        if "cover" in requested_types:
+            out.append("cover")
+        return out
+    return requested_types
+
+
 BATCH_SIZE = 10  # chunks per GPT call; fewer round-trips = faster total analysis
 
 
@@ -631,6 +724,7 @@ def run_full_analysis(
     total_words: int = 0,
     is_well_known_book: bool = False,
     analysis_run_id: Optional[str] = None,
+    analysis_mode: str = "pro",
 ) -> dict:
     """
     Run the complete analysis pipeline:
@@ -659,6 +753,16 @@ def run_full_analysis(
 
     run_id = analysis_run_id or str(uuid.uuid4())
     logger.info("[analyze] run_full_analysis: analysis_run_id=%s", run_id)
+    # #region agent log
+    try:
+        import os as _os
+        _log_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "debug-e99f89.log")
+        _payload = {"sessionId": "e99f89", "timestamp": int(time.time() * 1000), "location": "ai_service.py:run_full_analysis", "message": "run_full_analysis entered", "data": {"num_chunks": len(chunks), "num_batches": (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE}, "hypothesisId": "H1"}
+        with open(_log_path, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
 
     all_batch_results: list[dict] = []
     all_chunk_analyses: list[dict] = []
@@ -695,6 +799,17 @@ def run_full_analysis(
             except Exception:
                 pass
         logger.info("[analyze] Batch %d/%d done in %.1fs", batch_num, num_batches, time.perf_counter() - t_batch)
+        # #region agent log
+        if batch_num == 1:
+            try:
+                import os as _os
+                _log_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "debug-e99f89.log")
+                _payload = {"sessionId": "e99f89", "timestamp": int(time.time() * 1000), "location": "ai_service.py:run_full_analysis", "message": "first batch done", "data": {"batch_num": batch_num, "num_batches": num_batches}, "hypothesisId": "H1"}
+                with open(_log_path, "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+        # #endregion
 
     # 2. Consolidation
     t_cons = time.perf_counter()
@@ -705,7 +820,10 @@ def run_full_analysis(
         except Exception:
             pass
     consolidated = consolidate_results(
-        all_batch_results, is_well_known_book=is_well_known_book, run_id=run_id
+        all_batch_results,
+        is_well_known_book=is_well_known_book,
+        run_id=run_id,
+        analysis_mode=analysis_mode,
     )
     logger.info("[analyze] Consolidation done in %.1fs", time.perf_counter() - t_cons)
 

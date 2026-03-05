@@ -8,11 +8,11 @@ import os
 load_dotenv()
 
 from app.database import init_db  # noqa: E402
-from app.routers import books, visual_bible, illustrations, webhook, scenes, settings  # noqa: E402
+from app.routers import books, visual_bible, illustrations, webhook, scenes, settings, covers  # noqa: E402
 from app.services.openverse_auth import start_background_refresh  # noqa: E402
 
 app = FastAPI(
-    title="StoryForge AI",
+    title="Noctua",
     description="AI-powered book cover and illustration platform for self-publishing authors",
     version="2.0.0",
 )
@@ -43,6 +43,7 @@ app.include_router(illustrations.router, prefix="/api", tags=["illustrations"])
 app.include_router(webhook.router, prefix="/api", tags=["webhook"])
 app.include_router(scenes.router, prefix="/api", tags=["scenes"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
+app.include_router(covers.router, prefix="/api", tags=["covers"])
 
 
 @app.on_event("startup")

@@ -1,4 +1,4 @@
-# Codebase Snapshot — YRead / StoryForge AI
+# Codebase Snapshot — Noctua
 
 Comprehensive documentation for external AI (e.g. Claude) to produce implementation plans and test specifications. Exhaustive and precise; nothing omitted that would affect implementation decisions.
 
@@ -25,7 +25,8 @@ YRead/
 │   │   │   ├── illustrations.py
 │   │   │   ├── webhook.py
 │   │   │   ├── scenes.py
-│   │   │   └── settings.py
+│   │   │   ├── settings.py
+│   │   │   └── covers.py
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── ai_service.py
@@ -36,6 +37,9 @@ YRead/
 │   │       ├── ontology_constants.py
 │   │       ├── artefact_analysis_service.py
 │   │       ├── cover_analysis_service.py
+│   │       ├── i2t_analysis_service.py
+│   │       ├── prompt_engineering_service.py
+│   │       ├── cover_prompt_assembler.py
 │   │       ├── genre_defaults.py
 │   │       ├── scene_extractor.py
 │   │       ├── scene_visual_composer.py
@@ -46,6 +50,7 @@ YRead/
 │   │       │   ├── base.py
 │   │       │   ├── unsplash_provider.py
 │   │       │   ├── serpapi_provider.py
+│   │       │   ├── serper_provider.py
 │   │       │   ├── pexels_provider.py
 │   │       │   ├── pixabay_provider.py
 │   │       │   ├── openverse_provider.py
@@ -58,7 +63,8 @@ YRead/
 │   │           ├── base.py
 │   │           ├── abstract_provider.py
 │   │           ├── sd_provider.py
-│   │           └── flux_provider.py
+│   │           ├── flux_provider.py
+│   │           └── dalle_provider.py
 │   ├── data/
 │   │   ├── texts/
 │   │   └── uploads/
@@ -86,17 +92,29 @@ YRead/
 │   │   │   ├── test_cover_analysis.py
 │   │   │   ├── test_models_phase1.py
 │   │   │   ├── test_crud_phase2.py
-│   │   │   └── test_bugs_phase7.py
+│   │   │   ├── test_bugs_phase7.py
+│   │   │   ├── test_analysis_branch.py
+│   │   │   ├── test_i2t_service.py
+│   │   │   ├── test_prompt_engineering_service.py
+│   │   │   └── test_serper_provider.py
 │   │   ├── integration/
 │   │   │   ├── test_analysis_phase5.py
 │   │   │   ├── test_settings_and_analyze.py
 │   │   │   └── test_scene_api.py
 │   │   └── e2e/
-│   │       └── test_e2e_pipeline_spec.py
+│   │       ├── test_e2e_pipeline_spec.py
+│   │       └── test_e2e_i2t_pipeline.py
 │   ├── .env
 │   ├── .env.example
 │   └── (app.db, requirements, etc.)
 ├── frontend/
+│   ├── e2e/
+│   │   ├── cover_only_path.spec.ts
+│   │   ├── full_book_path.spec.ts
+│   │   └── fixtures/
+│   │       ├── short_story.txt
+│   │       └── sample_cover.jpg
+│   ├── playwright.config.ts
 │   ├── src/
 │   │   ├── main.tsx
 │   │   ├── App.tsx
@@ -107,7 +125,9 @@ YRead/
 │   │   │   ├── StyleSelector.tsx
 │   │   │   ├── VisualBibleReview.tsx
 │   │   │   ├── WorkflowLayout.tsx
-│   │   │   └── WorkflowNav.tsx
+│   │   │   ├── WorkflowNav.tsx
+│   │   │   ├── FeatureGate.tsx
+│   │   │   └── CoverBriefEditor.tsx
 │   │   ├── pages/
 │   │   │   ├── HomePage.tsx
 │   │   │   ├── SetupPage.tsx
@@ -116,8 +136,12 @@ YRead/
 │   │   │   ├── ReviewSearchResultPage.tsx
 │   │   │   ├── VisualBiblePage.tsx
 │   │   │   ├── ReadingPage.tsx
-│   │   │   └── SettingsPage.tsx
+│   │   │   ├── SettingsPage.tsx
+│   │   │   ├── MoodBoardPage.tsx
+│   │   │   ├── CoverStudioPage.tsx
+│   │   │   └── TextStudioPage.tsx
 │   │   ├── context/
+│   │   │   ├── AuthContext.tsx
 │   │   │   └── BookContext.tsx
 │   │   ├── hooks/
 │   │   │   └── useSettings.ts
@@ -126,7 +150,12 @@ YRead/
 │   └── package.json
 ├── docs/
 │   ├── application_scope.md
-│   └── codebase_snapshot.md (this file)
+│   ├── codebase_snapshot.md (this file)
+│   ├── frontend_code_snapshot.md
+│   ├── LLM_Analysis_Prompts.md
+│   ├── UAT_Phase1-6Tracking.md
+│   ├── VISUAL_PIPELINE.md
+│   └── (other planning/testing docs)
 └── (Bugs and enhancements.md, debug-*.log, etc.)
 ```
 
@@ -222,11 +251,13 @@ All SQLAlchemy models and raw table definitions. Column types, nullability, defa
 | known_adaptations_json | Text | YES | — |
 | entity_activations | Text | YES | — |
 | genre | Text | YES | — |
+| analysis_mode | String(20) | NO | 'pro' |
 | created_at | DateTime | — | datetime.utcnow |
 | updated_at | DateTime | — | datetime.utcnow, onupdate=datetime.utcnow |
 
 - **Relationships:** chunks, characters, locations, visual_bible, illustrations, covers, kdp_exports, search_queries, scenes, engine_ratings, artefacts, cover_analysis (one), visual_bible_entries, cover_concepts (all cascade delete-orphan where applicable).
 - **Phase 7:** scene_display_count = how many scenes to show in UI (extraction uses total_words); target_audience = children|ya|adult|literary; search_query_strategy = tokens|adaptive for reference search.
+- **Phase 8a:** analysis_mode = 'simple' (Book Cover mode, characters only) or 'pro' (Full Book, all entities). Default 'pro'.
 
 **Table: `chunks`**
 | Column | Type | Nullable | Default |
@@ -373,11 +404,15 @@ All SQLAlchemy models and raw table definitions. Column types, nullability, defa
 | primary_cover_location_id | Integer | YES | — |
 | primary_cover_artefact_id | Integer | YES | — |
 | full_description | Text | YES | — |
+| reference_style_template | Text | YES | — |
+| reference_style_notes | Text | YES | — |
+| reference_image_url | Text | YES | — |
 | created_at | DateTime | — | datetime.utcnow |
 | updated_at | DateTime | — | datetime.utcnow, onupdate=datetime.utcnow |
 
 - **Index:** ix_cover_analysis_book_id (book_id).
 - **Phase 7:** cover_type = object_centered|character_centered|setting_centered|abstract|typography_centered; color_palette_structured = JSON (dominant, accent, temperature, contrast, saturation); primary_cover_*_id = single focal entity; full_description for search/generation.
+- **Phase 8b:** reference_style_template = T2I prompt string from GPT-4o Vision I2T; reference_style_notes = JSON (composition_notes, color_palette_extracted, style_tags, mood_keywords, lighting_description); reference_image_url = URL of reference cover analysed.
 
 **Table: `visual_bible_entries`**
 | Column | Type | Nullable | Default |
@@ -544,6 +579,7 @@ Full content of `_run_migrations()`:
 - **Phase 7 BUG-2:** books.scene_display_count INTEGER DEFAULT 10, books.target_audience TEXT DEFAULT 'adult'.
 - **Phase 7.1:** cover_analysis.cover_type, color_palette_structured, primary_cover_character_id, primary_cover_location_id, primary_cover_artefact_id.
 - **Phase 7.5:** characters/locations/artefacts/cover_analysis.full_description TEXT; books.search_query_strategy TEXT DEFAULT 'tokens'.
+- **Phase 8b:** cover_analysis.reference_style_template, reference_style_notes (TEXT/JSON), reference_image_url (TEXT).
 - **Deprecated:** _drop_table_if_exists("reading_progress")
 
 Helper: `_add_column_if_missing(table, column, col_type)` uses SQLAlchemy inspect to check columns and runs `ALTER TABLE ... ADD COLUMN` if missing. `_drop_table_if_exists(table)` drops the table if it exists.
@@ -554,7 +590,9 @@ Helper: `_add_column_if_missing(table, column, col_type)` uses SQLAlchemy inspec
 
 For every FastAPI router: HTTP method, full path, path/query/body types, response schema, service functions called, implementation status, background tasks.
 
-**Base prefix for all API routes:** `/api` (from main.py).
+**Base prefix for all API routes:** `/api` (from main.py). **App title:** FastAPI app in main.py uses `title="Noctua"`.
+
+**EntitySummariesUpdate:** characters: list[dict] (id, physical_description?, full_description?, personality_traits?, entity_visual_tokens?); locations: list[dict]. For characters, if entity_visual_tokens is present it is serialized to entity_visual_tokens_json before crud.update_character.
 
 ### 3.1 Health (main.py)
 
@@ -566,10 +604,11 @@ For every FastAPI router: HTTP method, full path, path/query/body types, respons
 
 | Method | Path | Params | Body | Response | Service / CRUD | Status |
 |--------|------|--------|------|----------|----------------|--------|
-| POST | /api/manuscripts/upload | — | file: UploadFile | BookResponse | upload_service.process_manuscript_upload, crud.create_book, crud.update_book | Complete |
+| POST | /api/manuscripts/upload | — | file: UploadFile, analysis_mode?: Form("pro") | BookResponse | upload_service.process_manuscript_upload, crud.create_book (with analysis_mode), crud.update_book | Complete |
 | POST | /api/books/import | — | BookImportRequest | BookResponse | book_service.download_text_from_google_drive, compute_metadata, guess_title; crud.create_book, update_book | Complete |
 | GET | /api/books/{book_id} | book_id: int | — | BookResponse | crud.get_book | Complete |
 | GET | /api/books | skip: int=0, limit: int=100 | — | list[BookResponse] | crud.get_books | Complete |
+| POST | /api/books | — | BookCreate (title, author?, analysis_mode?="pro") | BookResponse (201) | crud.create_book | Complete |
 | DELETE | /api/books/{book_id} | book_id: int | — | StatusResponse | crud.delete_book | Complete |
 | POST | /api/books/{book_id}/chunk | book_id: int | — | StatusResponse | book_service.chunk_text; crud.* chunks | Complete |
 | POST | /api/books/{book_id}/analyze | book_id: int | BookAnalyzeRequest | AnalyzeStatusResponse (202) | crud.*; BackgroundTasks → _run_analysis_background (entity_types: characters, locations, artefacts, cover; selective clear; run_full_analysis, artefact_analysis_service, cover_analysis_service; persist) | Complete |
@@ -596,23 +635,31 @@ For every FastAPI router: HTTP method, full path, path/query/body types, respons
 |--------|------|--------|------|----------|----------------|--------|
 | GET | /api/books/{book_id}/visual-bible | book_id: int | — | `{ visual_bible, characters, locations }` (characters/locations include selected_reference_urls) | crud.get_book, get_visual_bible, get_characters_by_book, get_locations_by_book | Complete |
 | GET | /api/books/{book_id}/proposed-search-queries | book_id: int, main_only: bool=True | — | `{ characters, locations, scenes, artefacts, cover: {proposed_queries, cover_analysis_summary}? }` | search_service.get_proposed_search_queries | Complete |
-| PATCH | /api/books/{book_id}/entity-summaries | book_id: int | EntitySummariesUpdate | `{ status }` | crud.update_character, update_location | Complete |
+| PATCH | /api/books/{book_id}/entity-summaries | book_id: int | EntitySummariesUpdate | `{ status }` | crud.update_character, update_location; characters[].entity_visual_tokens → entity_visual_tokens_json | Complete |
 | POST | /api/books/{book_id}/search-references | book_id: int | SearchReferencesRequest? | `{ characters, locations, artefacts, cover: {cover: images[]}, queries_run, provider_usage }` | search_service.search_references_for_book; crud (reference_images, trim_reference_images_fifo) | Complete |
 | GET | /api/books/{book_id}/reference-results | book_id: int | — | `{ cover: {cover: images[]}, characters, locations, artefacts: {entityName: images[]} }` (cover first to avoid truncation) | crud.get_reference_images_for_entity, get_cover_analysis | Complete |
 | POST | /api/books/{book_id}/visual-bible/approve | book_id: int | VisualBibleApproveRequest | StatusResponse | crud.update_character/update_location/update_artefact (reference_image_url, selected_reference_urls), approve_visual_bible | Complete |
 | POST | /api/books/{book_id}/reference-upload | book_id: int | Form: entity_type (character\|location\|artefact\|cover), entity_id, file | `{ url, thumbnail, source, id }` | crud.create_reference_image, trim_reference_images_fifo | Complete |
 | PATCH | /api/books/{book_id}/engine-ratings | book_id: int | EngineRatingUpdate | StatusResponse | crud.update_engine_rating | Complete |
 | GET | /api/books/{book_id}/engine-ratings | book_id: int | — | list[EngineRatingResponse] | crud.get_engine_ratings_list | Complete |
-| GET | /api/books/{book_id}/cover-analysis | book_id: int | — | CoverAnalysisResponse (404 if not run) | crud.get_cover_analysis | Complete |
+| GET | /api/books/{book_id}/cover-analysis | book_id: int | — | CoverAnalysisResponse (404 if not run); includes reference_style_template, reference_style_notes, reference_image_url (I2T) | crud.get_cover_analysis | Complete |
 | PATCH | /api/books/{book_id}/cover-analysis | book_id: int | CoverAnalysisUpdateRequest | CoverAnalysisResponse | crud.create_or_update_cover_analysis | Complete |
 | GET | /api/books/{book_id}/visual-bible/entries | book_id: int, entity_type?, entity_id? | — | list[VisualBibleEntryResponse] | crud.get_visual_bible_entries | Complete |
 | POST | /api/books/{book_id}/visual-bible/entries/generate | book_id: int | VisualBibleEntryGenerateRequest | VisualBibleEntryResponse (202) | crud.create_visual_bible_entry; BackgroundTasks → T2I stub | Complete |
 | POST | /api/books/{book_id}/visual-bible/entries/generate-all | book_id: int | VisualBibleEntryGenerateAllRequest? | { queued, entries } | crud.create_visual_bible_entry per angle; BackgroundTasks | Complete |
 | PATCH | /api/books/{book_id}/visual-bible/entries/{entry_id} | book_id, entry_id: int | VisualBibleEntryPatchRequest | VisualBibleEntryResponse | crud.update_visual_bible_entry | Complete |
 
-**SearchReferencesRequest:** main_only=True, character_queries?, location_queries?, character_summaries?, location_summaries?, preferred_provider?: "unsplash"|"serpapi", search_entity_types?: "characters"|"locations"|"both"|"artefacts"|"cover"|"all", enabled_providers?: list[str].
+**SearchReferencesRequest:** main_only=True, character_queries?, location_queries?, character_summaries?, location_summaries?, preferred_provider?: "unsplash"|"serpapi", search_entity_types?: "characters"|"locations"|"both"|"artefacts"|"cover"|"all", enabled_providers?: list[str], cover_queries?: list[str].
 
 **VisualBibleApproveRequest:** character_selections: dict[str, list[str]], location_selections: dict[str, list[str]], artefact_selections: dict[str, list[str]], cover_selections: list[str].
+
+### 3.3.5 Covers router (app/routers/covers.py)
+
+| Method | Path | Params | Body | Response | Service / CRUD | Status |
+|--------|------|--------|------|----------|----------------|--------|
+| POST | /api/books/{book_id}/analyze-cover-reference | book_id: int | AnalyzeCoverReferenceRequest | I2TAnalysisResult | i2t_analysis_service.run_i2t_analysis; crud.get_or_create_cover_analysis, update_cover_analysis | Complete |
+
+**AnalyzeCoverReferenceRequest:** image_url: str, mode: Literal["cover", "illustration"] = "cover". **I2TAnalysisResult:** style_template, composition_notes, color_palette_extracted (dict), style_tags, mood_keywords, lighting_description.
 
 ### 3.4 Scenes router (app/routers/scenes.py)
 
@@ -635,7 +682,7 @@ For every FastAPI router: HTTP method, full path, path/query/body types, respons
 | Method | Path | Params | Body | Response | Service / CRUD | Status |
 |--------|------|--------|------|----------|----------------|--------|
 | GET | /api/books/{book_id}/cover-concepts | book_id: int | — | list[CoverConceptResponse] | crud.get_cover_concepts | Complete |
-| POST | /api/books/{book_id}/cover-concepts/generate | book_id: int | CoverConceptGenerateRequest? | { queued, concepts } | crud.create_cover_concept × concept_count; default prompt from cover_analysis.cover_t2i_prompt; BackgroundTasks → T2I stub | Complete |
+| POST | /api/books/{book_id}/cover-concepts/generate | book_id: int | CoverConceptGenerateRequest? | { queued, concepts } | crud.create_cover_concept × concept_count (status=generating); BackgroundTasks → _generate_concept_background (run_prompt_merge or CoverPromptAssembler, get_cover_t2i_provider().generate); Phase 13 | Complete |
 | PATCH | /api/books/{book_id}/cover-concepts/{concept_id} | book_id, concept_id: int | CoverConceptPatchRequest | CoverConceptResponse | crud.update_cover_concept | Complete |
 | POST | /api/books/{book_id}/cover-concepts/{concept_id}/select | book_id, concept_id: int | — | StatusResponse | crud.set_selected_cover_concept | Complete |
 
@@ -646,7 +693,8 @@ For every FastAPI router: HTTP method, full path, path/query/body types, respons
 ### 3.8 Background tasks
 
 - **startup:** init_db(), start_background_refresh() (Openverse token refresh thread).
-- **POST /api/books/{book_id}/analyze:** BackgroundTasks.add_task(_run_analysis_background, book_id, req_dict). Book is updated with scene_count from request (persisted for re-runs). _run_analysis_background runs jobs per entity_types (characters+locations → run_full_analysis; artefacts and cover may run in parallel via ThreadPoolExecutor). Selective clear per type. When persisting: main_characters and main_locations are capped to MAX_MAIN_CHARACTERS and MAX_MAIN_LOCATIONS (ai_service); scenes created from pipeline output are capped to scene_count_to_use (only first scene_count_to_use scenes are written). Progress updates are thread-safe: all writes to _analysis_progress use _progress_lock and _update_entity_progress(book_id, entity_type, status, current, total); overall_status uses _set_overall_status(book_id, status). Scene extraction is skipped only when workflow_type is cover_only and "characters" is not in entity_types (scene_count_to_use = 0); otherwise scene_count from request is passed to run_full_analysis.
+- **POST /api/books:** Creates book via crud.create_book with BookCreate (title, author?, analysis_mode?="pro"). Returns BookResponse (201).
+- **POST /api/books/{book_id}/analyze:** BackgroundTasks.add_task(_run_analysis_background, book_id, req_dict). Book is updated with scene_count from request (persisted for re-runs). _run_analysis_background resolves entity_types via get_entity_types_for_mode(book.analysis_mode, requested_types) so simple mode runs characters-only; then runs jobs per entity_types (characters+locations → run_full_analysis; artefacts and cover may run in parallel via ThreadPoolExecutor). Selective clear per type. When persisting: main_characters and main_locations are capped to MAX_MAIN_CHARACTERS and MAX_MAIN_LOCATIONS (ai_service); scenes created from pipeline output are capped to scene_count_to_use (only first scene_count_to_use scenes are written). Progress updates are thread-safe: all writes to _analysis_progress use _progress_lock and _update_entity_progress(book_id, entity_type, status, current, total); overall_status uses _set_overall_status(book_id, status). Scene extraction is skipped only when workflow_type is cover_only and "characters" is not in entity_types (scene_count_to_use = 0); otherwise scene_count from request is passed to run_full_analysis.
 
 ---
 
@@ -679,6 +727,9 @@ For each file in services/ (and subdirectories): purpose, public functions (sign
 
 - `detect_manuscript_language(chunks, sample_chars=4000) -> str`  
   Uses langdetect on concatenated chunk text; returns ISO 639-1 or "en".
+
+- `get_entity_types_for_mode(analysis_mode, requested_types) -> list[str]`  
+  (Phase 8a.) Simple mode: returns `["character"]` only; pro mode: returns requested_types. Used by books router before dispatching analysis.
 
 - `build_entity_visual_tokens_batch(entities) -> list[dict]`  
   Single batched OpenAI call; input list of entity dicts, output same order with core_tokens, style_tokens, archetype_tokens, anti_tokens.
@@ -817,6 +868,17 @@ For each file in services/ (and subdirectories): purpose, public functions (sign
 
 **Constants:** GENRE_COVER_CONVENTIONS (fantasy, sci_fi, thriller, etc.). **External API:** OpenAI. **DB:** None.
 
+### 4.7.5 i2t_analysis_service.py (Phase 8b)
+
+**Purpose:** Reverse-engineer visual style of a reference book cover image using GPT-4o Vision (I2T). Produces style_template and structured notes for use by PromptEngineeringService.
+
+**Public functions:**
+
+- `run_i2t_analysis(image_url: str, mode: Literal["cover", "illustration"] = "cover") -> I2TAnalysisResult`  
+  Async. Calls GPT-4o Vision (gpt-4o-mini) with image URL; returns I2TAnalysisResult. On missing OPENAI_API_KEY or any exception returns empty result (no raise). Mode "cover" uses cover composition vocabulary; "illustration" uses scene composition vocabulary.
+
+**Constants:** COVER_EXTRACTION_SYSTEM_PROMPT, ILLUSTRATION_EXTRACTION_SYSTEM_PROMPT. **External API:** OpenAI (Vision). **DB:** None.
+
 ### 4.8 genre_defaults.py (Phase 4)
 
 **Purpose:** Genre-based default entity activations for analysis.
@@ -869,12 +931,18 @@ For each file in services/ (and subdirectories): purpose, public functions (sign
 
 ### 4.11 engine_selector.py
 
-**Purpose:** Select best image search providers per entity from ENGINE_AFFINITY matrix and per-book engine_ratings. Cover uses fixed COVER_PROVIDERS (behance, dribbble, unsplash, serpapi).
+**Purpose:** Select best image search providers per entity from ENGINE_AFFINITY matrix and per-book engine_ratings. Cover uses fixed COVER_PROVIDERS (behance, dribbble, unsplash, serpapi). Also provides cover T2I provider and supplementary search providers (Phase 9/9b).
 
 **Public functions:**
 
 - `select_engines(entity_class, entity_type, style_category, available_providers, engine_ratings, top_n=2) -> list[str]`  
   When entity_type == "cover": returns COVER_PROVIDERS filtered by available_providers (no affinity matrix). Otherwise tiered fallback: exact entity_class|style_category (or entity_class only for entity_type "artefact"), parent class, generic location|human or other_artefact, then hardcoded default. Applies rating multiplier; returns up to top_n provider names from available_providers.
+
+- `get_cover_t2i_provider()` (Phase 9)  
+  Returns best available T2I provider for cover generation: FluxKontextProvider (fal.ai) if FAL_API_KEY set, else DalleProvider (OpenAI). Uses BaseCoverT2IProvider interface (generate(prompt, image_url, negative_prompt, aspect_ratio) -> T2IGenerationResult).
+
+- `get_supplementary_search_providers(entity_type) -> list` (Phase 9b)  
+  Returns supplementary search providers for the given entity type. SerperProvider included only for entity_type "artefact" or "location"; empty list for character/cover.
 
 **Constants:** COVER_PROVIDERS = ["behance", "dribbble", "unsplash", "serpapi"].
 
@@ -899,9 +967,11 @@ For each file in services/ (and subdirectories): purpose, public functions (sign
 
 ### 4.13 providers/base.py
 
-**Purpose:** Abstract base for image search providers.
+**Purpose:** Abstract base for image search providers (BaseImageProvider) and supplementary search (BaseSearchProvider, Phase 9b).
 
 **BaseImageProvider:** name (str); is_available() -> bool; search(query, content_type, count=15) -> list[dict]; format_query(raw_query) -> str (default return as-is). Returned dicts: url, thumbnail, width, height, credit, license, provider; optional search_metadata or title, description, alt, tags.
+
+**SearchResult** (dataclass): url, title, source_url, provider, watermarked. **BaseSearchProvider:** is_available() -> bool; search(query, num=10, **kwargs) -> list[SearchResult]. Used by SerperProvider.
 
 ### 4.14 providers/unsplash_provider.py
 
@@ -941,13 +1011,21 @@ For each file in services/ (and subdirectories): purpose, public functions (sign
 
 **Purpose:** Dribbble via SerpAPI Google Images with site:dribbble.com. **SERPAPI_KEY** / **SEARCH_API_KEY** (read in __init__ from os.getenv). is_available(), format_query (appends site:dribbble.com), search() returns list with provider="dribbble".
 
-### 4.23 t2i_providers (abstract_provider, sd_provider, flux_provider)
+### 4.22b providers/serper_provider.py (Phase 9b)
 
-**Purpose:** Text-to-image generation; currently stubs.
+**Purpose:** Google image search via Serper.dev API. Supplementary provider for artefact and location reference image searches (not for book cover I2T). **SERPER_API_KEY** from env. Hard blacklist: lookaside.instagram.com, craiyon.com, getimg.ai, ideogram.ai, etc. Watermarked flag for shutterstock, gettyimages, dreamstime, istockphoto. search(query, num=10) -> list[SearchResult]. Used by get_supplementary_search_providers("artefact"|"location").
 
+### 4.23 t2i_providers (abstract_provider, sd_provider, flux_provider, dalle_provider) + prompt_engineering_service
+
+**Purpose:** Text-to-image generation. Cover path uses BaseCoverT2IProvider (Phase 9).
+
+- **base.py:** T2IRequest, T2IResult, BaseT2IProvider (legacy); T2IGenerationResult (dataclass: url, width, height, model, prompt_used, provider), BaseCoverT2IProvider (is_available(), async generate(prompt, image_url, negative_prompt, aspect_ratio, **kwargs) -> T2IGenerationResult).
 - **abstract_provider:** Stub implementation returning prompt_used without external call.
 - **sd_provider:** SD_A1111_URL, SD_COMFYUI_URL from env; generate() logs and TODO; no real call.
-- **flux_provider:** FAL_API_KEY, REPLICATE_API_KEY from env; generate() logs and TODO; no real call.
+- **flux_provider (Phase 9):** FluxKontextProvider. FAL_API_KEY required. TEXT_ENDPOINT (flux-pro/v1.1), KONTEXT_ENDPOINT (flux-pro/kontext). generate() uses fal_client.run_async; image_url selects Kontext endpoint. Returns T2IGenerationResult.
+- **dalle_provider (Phase 9):** DalleProvider. OPENAI_API_KEY. DALL-E 3 HD; image_url ignored (warning logged). Returns T2IGenerationResult.
+- **prompt_engineering_service.py (Phase 9):** run_prompt_merge(style_template, entity, user_instruction, template_subject_class) -> PromptEngineeringResult. Merges I2T style_template with entity visual tokens via GPT-4o; heuristic compatibility (humanoid/spatial); fallback on API failure. PromptEngineeringResult: final_prompt, negative_prompt, compatibility_status (COMPATIBLE|WARNING|INCOMPATIBLE), compatibility_note.
+- **cover_prompt_assembler.py (Phase 13):** CoverPromptAssembler.assemble(genre, cover_type, primary_entity_tokens) -> CoverAssemblerResult (prompt, negative_prompt). Fallback when no reference_style_template; used by illustrations _generate_concept_background.
 
 **DB:** None. **In-memory:** None beyond env.
 
@@ -974,14 +1052,16 @@ Full list of environment variables read in the codebase; where read; what they c
 | OPENVERSE_ACCESS_TOKEN | openverse_auth.get_token() | Openverse when no client id/secret | "" |
 | SD_A1111_URL | t2i_providers/sd_provider.py | Stable Diffusion A1111 (stub) | "" |
 | SD_COMFYUI_URL | t2i_providers/sd_provider.py | ComfyUI (stub) | "" |
-| FAL_API_KEY | t2i_providers/flux_provider.py | FAL (stub) | "" |
-| REPLICATE_API_KEY | t2i_providers/flux_provider.py | Replicate (stub) | "" |
+| FAL_API_KEY | t2i_providers/flux_provider.py, engine_selector | FLUX Kontext via fal.ai (Phase 9) | "" |
+| COVER_T2I_PROVIDER | .env.example only | Informational (flux_kontext \| dalle); auto-detected | — |
+| SERPER_API_KEY | providers/serper_provider.py, engine_selector | Serper.dev Google image search (Phase 9b) | "" |
+| REPLICATE_API_KEY | (legacy; flux_provider now uses FAL only) | — | "" |
 
 Tests: e2e test uses SERPAPI_KEY or SEARCH_API_KEY, UNSPLASH_ACCESS_KEY to skip live provider tests if not set.
 
 ### 5.2 .env.example contents (backend/.env.example)
 
-As in repository (abbreviated here): OPENAI_API_KEY, GEMINIGEN_API_KEY, GEMINIGEN_WEBHOOK_SECRET, UNSPLASH_ACCESS_KEY, SERPAPI_KEY, SEARCH_API_KEY, PEXELS_API_KEY, PIXABAY_API_KEY, OPENVERSE_CLIENT_ID, OPENVERSE_CLIENT_SECRET, OPENVERSE_ACCESS_TOKEN, DATABASE_URL. Comments describe each. No Pydantic settings class; all reads are os.getenv.
+As in repository (abbreviated here): OPENAI_API_KEY, GEMINIGEN_API_KEY, GEMINIGEN_WEBHOOK_SECRET, UNSPLASH_ACCESS_KEY, SERPAPI_KEY, SEARCH_API_KEY, PEXELS_API_KEY, PIXABAY_API_KEY, OPENVERSE_*, SERPER_API_KEY (Phase 9b), FAL_API_KEY, COVER_T2I_PROVIDER (Phase 9), DATABASE_URL. Comments describe each. No Pydantic settings class; all reads are os.getenv.
 
 ---
 
@@ -1001,8 +1081,12 @@ From App.tsx (React Router).
 | /books/:bookId/review-search-result | ReviewSearchResultPage | WorkflowLayout | Complete |
 | /books/:bookId/visual-bible | VisualBiblePage | WorkflowLayout | Complete |
 | /books/:bookId/preview | PreviewPage (ReadingPage) | WorkflowLayout | Complete |
+| /books/:bookId/mood-board | MoodBoardPage | WorkflowLayout | Phase 12: style reference + entity tabs, I2T, StyleTemplateSummaryCard |
+| /books/:bookId/cover-brief | AnalysisReviewPage | WorkflowLayout | Complete |
+| /books/:bookId/studio/cover | CoverStudioPage | WorkflowLayout | Phase 13: poll cover-concepts, concept grid, Select, Regenerate, KDP note, Continue to Typography |
+| /books/:bookId/studio/text | TextStudioPage | WorkflowLayout | Phase 13: canvas typography, export PNG 2560×1600, FeatureGate custom font |
 
-All routes are wrapped in AuthorWorkflowProvider (BookContext). WorkflowLayout wraps book-scoped routes and provides WorkflowNav/outlet.
+All routes are wrapped in AuthProvider and AuthorWorkflowProvider (BookContext). WorkflowLayout wraps book-scoped routes and provides WorkflowNav/outlet. WorkflowNav (Phase 10) shows COVER_ONLY_STEPS or FULL_BOOK_STEPS by workflowType.
 
 ---
 
@@ -1048,10 +1132,21 @@ Every component under src/components/ and src/pages/: filename, folder, props in
 - **UI:** Wraps outlet with WorkflowNav and layout shell.
 
 **WorkflowNav.tsx**  
-- **Props:** Links/steps derived from route or book.  
+- **Props:** None.  
 - **API:** None.  
-- **Context:** useBook() for book and navigation.  
-- **UI:** Step links (preview, analysis-review, review-search, review-search-result, visual-bible, manuscript-upload).
+- **Context:** useBook() for workflowType and book.  
+- **UI:** (Phase 10) Dual-path steps: COVER_ONLY_STEPS (Upload, Characters, Mood Board, Cover Brief, Generate, Typography) or FULL_BOOK_STEPS (+ Preview). Dashboard link + step buttons; current step by path.
+
+**FeatureGate.tsx** (Phase 10)  
+- **Props:** plan: 'pro', fallback?: ReactNode, children.  
+- **Context:** useAuth() for user.plan.  
+- **UI:** Renders children if user.plan === 'pro', else fallback. UpgradeBanner component for fallback.
+
+**CoverBriefEditor.tsx** (Phase 11)  
+- **Props:** bookId, analysisMode ('simple'|'pro'), coverAnalysis, characters, locations, artefacts.  
+- **API:** None (navigates to studio/cover on Generate).  
+- **Context:** useAuth() via FeatureGate for negative prompt.  
+- **UI:** Simple: cover type, primary element (characters), style reference thumbnail, Generate. Pro: + Merged Prompt (editable), Advanced (Panel A: reference_style_template), negative prompt (FeatureGate). Panel A expansion in localStorage (noctua_panel_a_expanded).
 
 ### 7.2 Pages (src/pages/)
 
@@ -1066,9 +1161,9 @@ Every component under src/components/ and src/pages/: filename, folder, props in
 - **UI:** Steps: upload (BookUpload) → style (StyleSelector) → analyzing (LoadingScreen with progress); then navigate to analysis-review.
 
 **AnalysisReviewPage.tsx**  
-- **API:** getCharacters, getLocations, getScenes, updateEntitySelections, getBook; possibly patchEntitySummaries.  
-- **Context:** useBook() for book, characters, locations, setCharacters, setLocations.  
-- **UI:** Entity tables; main-entity selection (is_main); scene list; proceed to review-search.
+- **API:** getCharacters, getLocations, getScenes, getArtefacts, getCoverAnalysis, updateEntitySelections, updateCoverAnalysis, patchEntitySummaries, updateScene, analyzeEntity.  
+- **Context:** useBook() for book (analysis_mode drives tab set).  
+- **UI:** (Phase 11) Tabs by book.analysis_mode: simple = Characters only; pro = Characters, Locations, Artefacts, Cover. is_main as read-only badge; is_selected_for_reference checkbox → updateEntitySelections. Cover tab renders CoverBriefEditor. Scenes section; re-analyze; Prepare reference search.
 
 **ReviewSearchPage.tsx**  
 - **API:** getProposedSearchQueries, searchReferences, patchEntitySummaries; getProvidersStatus, getEngineRatings, rateEngine; uploadReferenceImage.  
@@ -1081,9 +1176,9 @@ Every component under src/components/ and src/pages/: filename, folder, props in
 - **UI:** Review persisted reference images per entity; select multiple URLs; approve visual bible; optional upload.
 
 **VisualBiblePage.tsx**  
-- **API:** getVisualBible; approveVisualBible; uploadReferenceImage; getEngineRatings, rateEngine.  
-- **Context:** useBook() for book, characters, locations, visualBible, referenceImages.  
-- **UI:** Renders VisualBibleReview with data and approve/upload/rating.
+- **API:** None (placeholder).  
+- **Context:** useBook() for bookId.  
+- **UI:** Placeholder: "Next step: AI image generation and final visual bible"; button "Continue to Preview" navigates to reading. Does not yet render VisualBibleReview.
 
 **ReadingPage.tsx (PreviewPage)**  
 - **API:** getChunks(bookId); getProgress/updateProgress (backend endpoints missing — see Stubs).  
@@ -1141,10 +1236,15 @@ Every component under src/components/ and src/pages/: filename, folder, props in
 | tests/unit/test_crud_phase2.py | Phase 2 CRUD: artefacts, cover_analysis, visual_bible_entries, cover_concepts, entity_activations | in-memory SQLite db fixture | 9 |
 | tests/unit/test_search_phase6.py | Phase 6: Behance/Dribbble providers, select_engines cover/artefact, get_proposed_search_queries artefacts+cover, search_references_for_book artefacts | in-memory db, mock _search_all_providers | 6 |
 | tests/unit/test_bugs_phase7.py | Phase 7: BUG-1/BUG-2 (entity selections, scene_display_count/show_all), cover_analysis Phase 7 fields, VB angles/entries, cover-concepts GET/POST/PATCH/select | mocks for LLM/DB | 13 |
+| tests/unit/test_i2t_service.py | Phase 8b: I2T analysis service (run_i2t_analysis mock/empty/mode), analyze-cover-reference endpoint | AsyncMock, patch OPENAI_API_KEY | 5 |
+| tests/unit/test_prompt_engineering_service.py | Phase 9: run_prompt_merge (mock GPT), heuristic compatibility, fallback, FluxKontextProvider endpoints, get_cover_t2i_provider (flux/dalle) | asyncio.run, monkeypatch | 9 |
+| tests/unit/test_serper_provider.py | Phase 9b: _is_blacklisted, _is_watermarked, SerperProvider is_available/search, get_supplementary_search_providers | monkeypatch, mock httpx | 10 |
+| tests/unit/test_analysis_branch.py | Phase 8a: get_entity_types_for_mode (simple/pro), POST /api/books default/simple analysis_mode | init_db, TestClient | 5 |
 | tests/integration/test_analysis_phase5.py | Phase 5: analyze entity_types, analysis-progress format, GET artefacts, GET/PATCH cover-analysis, entity-activations, POST analyze/entity | client_with_book (upload+chunk) | 7 |
 | tests/integration/test_settings_and_analyze.py | GET /settings/providers; analyze flow with TestClient | module client, book_id from upload+chunk | 2+ |
 | tests/integration/test_scene_api.py | GET/PATCH scenes; POST generate-illustration (202) | module client, book/scenes from DB | Multiple |
 | tests/e2e/test_e2e_pipeline_spec.py | Full pipeline: upload → chunk → analyze → scenes → visual bible → search → T2I stub | client, book_id, fixtures | Many; some skipif no API keys; T2I and image_generation_enabled skipped |
+| tests/e2e/test_e2e_i2t_pipeline.py | Phase 14: I2T → CoverAnalysis → cover-concepts/generate; skipif no OPENAI_API_KEY; poll step skipif no FAL_API_KEY | client, book_id (upload+chunk) | 1 |
 
 Shared: No global conftest.py; each integration/e2e builds FastAPI TestClient and DB state as needed.
 
@@ -1152,9 +1252,9 @@ Shared: No global conftest.py; each integration/e2e builds FastAPI TestClient an
 
 ## 10. Frontend: Current Test Coverage
 
-- **Test files:** No `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx` found under frontend.
-- **Framework:** None (no Jest/Vitest/Playwright/Cypress in package.json scripts). Frontend uses Vite, TypeScript, ESLint; no test runner configured.
-- **Test utilities/mocks:** None.
+- **Unit:** Vitest + Testing Library; `npm run test`; tests under `src/tests/` (e.g. FeatureGate, WorkflowNav, CoverStudioPage, MoodBoardPage, AnalysisReviewPage, CoverBriefEditor, TextStudioPage).
+- **E2E (Phase 14):** Playwright; `npm run test:e2e`; `playwright.config.ts` (baseURL 5173, webServer `npm run dev`); specs in `e2e/`: `cover_only_path.spec.ts` (upload → analysis → moodboard → cover brief → generate), `full_book_path.spec.ts` (dashboard smoke); fixtures in `e2e/fixtures/` (short_story.txt, sample_cover.jpg). Cover-only E2E requires backend on port 8000 (proxy) and may stub generation in CI.
+- **Framework:** Vite, TypeScript, ESLint; Vitest for unit; Playwright for E2E.
 
 ---
 
@@ -1163,10 +1263,11 @@ Shared: No global conftest.py; each integration/e2e builds FastAPI TestClient an
 | Location | Type | Detail |
 |----------|------|--------|
 | backend/app/routers/scenes.py ~93 | Stub | POST .../scenes/{scene_id}/generate-illustration: returns 202 "Illustration generation queued (T2I provider not yet configured)"; no T2I call. |
-| backend/app/routers/illustrations.py | Stub | Router empty; no endpoints. |
+| backend/app/routers/illustrations.py | Implemented | GET/POST/PATCH cover-concepts; POST cover-concepts/generate (T2I); POST select. |
 | backend/app/routers/webhook.py | Stub | Router empty; no endpoints. |
 | backend/app/services/t2i_providers/sd_provider.py ~35–36 | Stub/TODO | generate() logs only; TODO implement A1111/ComfyUI. |
-| backend/app/services/t2i_providers/flux_provider.py ~35–36 | Stub/TODO | generate() logs only; TODO implement fal/Replicate. |
+| backend/app/services/t2i_providers/flux_provider.py | Implemented (Phase 9) | FluxKontextProvider: fal.ai FLUX Pro / Kontext; real generate() via fal_client. |
+| backend/app/services/t2i_providers/dalle_provider.py | Implemented (Phase 9) | DalleProvider: DALL-E 3 HD fallback when FAL_API_KEY not set. |
 | backend/app/services/t2i_providers/abstract_provider.py ~18 | Stub | Returns prompt_used without external API. |
 | frontend/src/services/api.ts getProgress, updateProgress | Missing backend | Calls GET/POST `/books/${bookId}/progress`; no such routes in backend (reading_progress table dropped in migrations). |
 | backend/tests/e2e/test_e2e_pipeline_spec.py ~271 | Comment | T2I is stub; assertion only 202 and message. |
@@ -1238,9 +1339,11 @@ List of dicts; each: url, thumbnail?, width?, height?, credit?, license?, provid
 
 **Output:** list of { name, core_tokens, style_tokens, archetype_tokens, anti_tokens } (same order).
 
-### 12.7 Book API (Phase 1)
+### 12.7 Book API (Phase 1, Phase 8a)
 
-**BookResponse:** Now includes entity_activations: list[str] (from JSON column), genre: str.
+**BookCreate:** Request body for POST /api/books: title: str, author?: str, analysis_mode?: Literal["simple","pro"] = "pro".
+
+**BookResponse:** Now includes entity_activations: list[str] (from JSON column), genre: str, analysis_mode: str (Phase 8a; default "pro").
 
 **BookAnalyzeRequest:** Now includes entity_types: list[str] = ["cover","characters","locations","artefacts"], genre: str = "".
 

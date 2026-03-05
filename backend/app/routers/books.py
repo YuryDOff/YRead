@@ -3,14 +3,27 @@ import json as json_lib
 import logging
 import os
 import threading
+import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
+# #region agent log
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str = "") -> None:
+    try:
+        log_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-e99f89.log")
+        payload = {"sessionId": "e99f89", "timestamp": int(_time.time() * 1000), "location": location, "message": message, "data": data, "hypothesisId": hypothesis_id}
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json_lib.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# #endregion
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.schemas import (
+    BookCreate,
     BookImportRequest,
     BookUpdateRequest,
     BookResponse,
@@ -35,7 +48,13 @@ from app.services.book_service import (
     chunk_text,
 )
 from app.services.upload_service import process_manuscript_upload, UploadError
-from app.services.ai_service import MAX_MAIN_CHARACTERS, MAX_MAIN_LOCATIONS, run_full_analysis
+from app.services.ai_service import (
+    MAX_MAIN_CHARACTERS,
+    MAX_MAIN_CHARACTERS_SIMPLE,
+    MAX_MAIN_LOCATIONS,
+    get_entity_types_for_mode,
+    run_full_analysis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +90,12 @@ def _set_overall_status(book_id: int, status: str) -> None:
 @router.post("/manuscripts/upload", response_model=BookResponse)
 async def upload_manuscript(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    analysis_mode: Optional[str] = Form("pro"),
+    db: Session = Depends(get_db),
 ):
     """
     Upload a manuscript file (.txt, .docx, .pdf) and create a book record.
-    This replaces the Google Drive import for B2B author workflow.
+    Optional analysis_mode: "simple" (characters only) or "pro" (default).
     """
     import time
     t0 = time.perf_counter()
@@ -100,11 +120,15 @@ async def upload_manuscript(
         logger.info("[upload] process_manuscript_upload done in %.2fs", time.perf_counter() - t1)
 
         t2 = time.perf_counter()
+        mode = (analysis_mode or "pro").strip().lower()
+        if mode not in ("simple", "pro"):
+            mode = "pro"
         book = crud.create_book(
             db,
             title=metadata['title'],
             total_words=metadata['word_count'],
             total_pages=metadata['estimated_pages'],
+            analysis_mode=mode,
         )
         logger.info("[upload] crud.create_book done in %.2fs, book_id=%s", time.perf_counter() - t2, book.id)
 
@@ -217,6 +241,18 @@ def list_books(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return crud.get_books(db, skip=skip, limit=limit)
 
 
+@router.post("/books", response_model=BookResponse, status_code=201)
+def create_book_endpoint(body: BookCreate, db: Session = Depends(get_db)):
+    """Create a book with title, optional author, and optional analysis_mode (default pro)."""
+    book = crud.create_book(
+        db,
+        title=body.title,
+        author=body.author,
+        analysis_mode=body.analysis_mode,
+    )
+    return book
+
+
 @router.delete("/books/{book_id}", response_model=StatusResponse)
 def delete_book(book_id: int, db: Session = Depends(get_db)):
     """Delete a book and all related data."""
@@ -288,13 +324,29 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
     from app.services.ai_service import detect_manuscript_language
 
     db = SessionLocal()
-    entity_types = req_dict.get("entity_types") or ["cover", "characters", "locations", "artefacts"]
+    requested_types = req_dict.get("entity_types") or ["cover", "characters", "locations", "artefacts"]
     genre = req_dict.get("genre") or ""
+    # #region agent log
+    _debug_log("books.py:_run_analysis_background", "background started", {"book_id": book_id, "requested_types": requested_types}, "H2")
+    # #endregion
     try:
         book = crud.get_book(db, book_id)
         if not book:
             logger.error("[analyze] background: book %s not found", book_id)
+            # #region agent log
+            _debug_log("books.py:_run_analysis_background", "book not found", {"book_id": book_id}, "H2")
+            # #endregion
             return
+        analysis_mode = getattr(book, "analysis_mode", "pro")
+        entity_types = get_entity_types_for_mode(analysis_mode, requested_types)
+        # Pipeline uses plural names (characters, locations, etc.)
+        entity_types = [
+            "characters" if et == "character" else et
+            for et in entity_types
+        ]
+        # #region agent log
+        _debug_log("books.py:_run_analysis_background", "entity_types resolved", {"entity_types": entity_types, "analysis_mode": analysis_mode}, "H3")
+        # #endregion
         # Persist display/audience from request (extraction uses total_words, not scene_count)
         if "scene_display_count" in req_dict:
             crud.update_book(db, book_id, scene_display_count=req_dict["scene_display_count"])
@@ -306,9 +358,15 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
         if not chunks_db:
             crud.update_book_status(db, book_id, "error")
             logger.error("[analyze] background: no chunks for book %s", book_id)
+            # #region agent log
+            _debug_log("books.py:_run_analysis_background", "no chunks", {"book_id": book_id}, "H2")
+            # #endregion
             return
         chunks_for_ai = [{"chunk_index": c.chunk_index, "text": c.text} for c in chunks_db]
         total_chunks = len(chunks_for_ai)
+        # #region agent log
+        _debug_log("books.py:_run_analysis_background", "setting progress", {"book_id": book_id, "total_chunks": total_chunks, "entity_types": entity_types}, "H2")
+        # #endregion
         _analysis_progress[book_id] = {
             "overall_status": "running",
             "entity_progress": {
@@ -327,6 +385,9 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
 
         try:
             if "characters" in entity_types or "locations" in entity_types:
+                # #region agent log
+                _debug_log("books.py:_run_analysis_background", "entering run_full_analysis branch", {"book_id": book_id}, "H1")
+                # #endregion
                 for et in ("characters", "locations"):
                     if et in _analysis_progress.get(book_id, {}).get("entity_progress", {}):
                         _update_entity_progress(book_id, et, "running", 0, total_chunks)
@@ -347,15 +408,20 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
                     progress_callback=_on_chunks,
                     total_words=total_words,
                     is_well_known_book=is_well_known_book,
+                    analysis_mode=analysis_mode,
                 )
                 chunk_analyses_for_downstream = result_full.get("chunk_analyses", [])
                 manuscript_lang = detect_manuscript_language(chunks_for_ai)
                 for et in ("characters", "locations"):
                     if et in _analysis_progress.get(book_id, {}).get("entity_progress", {}):
                         _update_entity_progress(book_id, et, "complete", total_chunks, total_chunks)
+                # #region agent log
+                _debug_log("books.py:_run_analysis_background", "characters/locations complete", {"book_id": book_id}, "H1")
+                # #endregion
                 # ----- Persist characters -----
+                char_limit = MAX_MAIN_CHARACTERS_SIMPLE if analysis_mode == "simple" else MAX_MAIN_CHARACTERS
                 char_name_to_id = {}
-                for ch_data in result_full.get("main_characters", [])[:MAX_MAIN_CHARACTERS]:
+                for ch_data in result_full.get("main_characters", [])[:char_limit]:
                     char = crud.create_character(
                         db,
                         book_id=book_id,
@@ -739,6 +805,9 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
                     _update_entity_progress(book_id, "cover", "complete", 2, 2)
 
             completed = [et for et in entity_types if _analysis_progress.get(book_id, {}).get("entity_progress", {}).get(et, {}).get("status") == "complete"]
+            # #region agent log
+            _debug_log("books.py:_run_analysis_background", "all phases done, setting complete", {"book_id": book_id, "completed": completed, "entity_types": entity_types}, "H1")
+            # #endregion
             existing_activations = []
             if book.entity_activations:
                 try:
@@ -761,6 +830,9 @@ def _run_analysis_background(book_id: int, req_dict: dict[str, Any]) -> None:
             pass
     except Exception as exc:
         logger.exception("Analysis failed for book %s: %s", book_id, exc)
+        # #region agent log
+        _debug_log("books.py:_run_analysis_background", "exception, popping progress", {"book_id": book_id, "exc_type": type(exc).__name__}, "H4")
+        # #endregion
         _analysis_progress.pop(book_id, None)
         try:
             crud.update_book_status(db, book_id, "error")

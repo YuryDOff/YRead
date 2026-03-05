@@ -67,7 +67,7 @@ const defaults: AuthorWorkflowState = {
   entityTypes: ['cover', 'characters', 'locations', 'artefacts'],
 };
 
-const AuthorWorkflowContext = createContext<AuthorWorkflowContextValue | undefined>(undefined);
+export const AuthorWorkflowContext = createContext<AuthorWorkflowContextValue | undefined>(undefined);
 
 export function AuthorWorkflowProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthorWorkflowState>(defaults);

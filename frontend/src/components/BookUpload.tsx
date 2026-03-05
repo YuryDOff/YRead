@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Upload, Loader2, AlertCircle, FileText, X, ChevronDown } from 'lucide-react';
 import { api, type Book } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 export interface BookUploadMetadata {
   genre?: string;
@@ -27,12 +28,16 @@ const GENRES = [
 ];
 
 export default function BookUpload({ onSuccess }: Props) {
+  const { user } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  
+  const [analysisMode, setAnalysisMode] = useState<'simple' | 'pro'>('simple');
+
+  const isSimple = user?.plan !== 'pro';
+
   // Form fields
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -117,6 +122,7 @@ export default function BookUpload({ onSuccess }: Props) {
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
+      formData.append('analysis_mode', isSimple ? 'simple' : analysisMode);
 
       const response = await api.post<Book>(
         '/manuscripts/upload',
@@ -185,6 +191,37 @@ export default function BookUpload({ onSuccess }: Props) {
           Upload your book file to get started with AI-powered cover generation
         </p>
       </div>
+
+      {/* Workflow selector — visible before file select so simple users see Full Book disabled */}
+      <fieldset className="mt-4" data-testid="workflow-fieldset">
+        <legend className="text-sm font-medium text-gray-700 mb-2">Workflow</legend>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="analysis_mode"
+              value="simple"
+              checked={analysisMode === 'simple'}
+              onChange={() => setAnalysisMode('simple')}
+            />
+            <span>Book Cover <span className="text-xs text-gray-400">(Fast)</span></span>
+          </label>
+          <label className={`flex items-center gap-2 ${isSimple ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+            <input
+              type="radio"
+              name="analysis_mode"
+              value="pro"
+              checked={analysisMode === 'pro'}
+              onChange={() => !isSimple && setAnalysisMode('pro')}
+              disabled={isSimple}
+            />
+            <span>Full Book</span>
+            {isSimple && (
+              <span className="text-xs text-amber-600 ml-1">(Pro only)</span>
+            )}
+          </label>
+        </div>
+      </fieldset>
 
       {/* Drag-and-drop zone */}
       {!selectedFile && (
@@ -330,6 +367,7 @@ export default function BookUpload({ onSuccess }: Props) {
                 />
               </div>
             </div>
+
           </div>
         </div>
       )}

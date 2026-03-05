@@ -128,6 +128,8 @@ def patch_entity_summaries(
         eid = item.get("id")
         if eid is not None:
             data = {k: v for k, v in item.items() if k != "id" and v is not None}
+            if "entity_visual_tokens" in data:
+                data["entity_visual_tokens_json"] = json.dumps(data.pop("entity_visual_tokens"))
             if data:
                 crud.update_character(db, int(eid), **data)
     for item in body.locations:
@@ -626,13 +628,16 @@ def patch_cover_analysis(
     body: CoverAnalysisUpdateRequest,
     db: Session = Depends(get_db),
 ):
-    """Update cover analysis (user edits). All fields optional."""
+    """Update cover analysis (user edits). All fields optional. Creates row if missing (e.g. for Mood Board upload)."""
     book = crud.get_book(db, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
     cover = crud.get_cover_analysis(db, book_id)
     if not cover:
-        raise HTTPException(status_code=404, detail="Cover analysis not found. Run analysis first.")
+        crud.create_or_update_cover_analysis(db, book_id)
+        cover = crud.get_cover_analysis(db, book_id)
+    if not cover:
+        raise HTTPException(status_code=404, detail="Cover analysis not found.")
     updates = body.model_dump(exclude_unset=True)
     if updates:
         crud.create_or_update_cover_analysis(db, book_id, **updates)

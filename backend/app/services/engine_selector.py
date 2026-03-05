@@ -3,7 +3,12 @@ Engine Selection Logic for image search providers.
 Picks the best providers for each entity based on entity_class, style_category,
 engine affinity matrix, and per-book engine ratings.
 """
+import logging
+import os
+
 from app.services.ontology_constants import ENTITY_PARENT
+
+logger = logging.getLogger(__name__)
 
 # Cover always uses behance + dribbble + unsplash as primary (genre used for query tuning, not provider selection)
 COVER_PROVIDERS = ["behance", "dribbble", "unsplash", "serpapi"]
@@ -181,3 +186,40 @@ def select_engines(
                 break
 
     return selected
+
+
+def get_cover_t2i_provider():
+    """
+    Returns the best available T2I provider for cover generation.
+    Preference: FluxKontextProvider (fal.ai) → DalleProvider (OpenAI fallback).
+    """
+    from app.services.t2i_providers.flux_provider import FluxKontextProvider
+    from app.services.t2i_providers.dalle_provider import DalleProvider
+
+    if os.getenv("FAL_API_KEY"):
+        try:
+            provider = FluxKontextProvider()
+            logger.info("T2I provider: FluxKontextProvider (fal.ai)")
+            return provider
+        except EnvironmentError:
+            pass
+
+    logger.info("T2I provider: DalleProvider (OpenAI fallback)")
+    return DalleProvider()
+
+
+def get_supplementary_search_providers(entity_type: str) -> list:
+    """
+    Returns supplementary search providers for the given entity type.
+    Serper is supplementary for artefact + location — not for book cover I2T search.
+    """
+    from app.services.providers.serper_provider import SerperProvider
+
+    provider = SerperProvider()
+    if not provider.is_available():
+        return []
+
+    if entity_type in ("artefact", "location"):
+        return [provider]
+
+    return []

@@ -45,6 +45,7 @@ def create_book(
     total_words: Optional[int] = None,
     total_pages: Optional[int] = None,
     is_well_known: bool = False,
+    analysis_mode: str = "pro",
 ) -> Book:
     book = Book(
         title=title,
@@ -55,6 +56,7 @@ def create_book(
         total_pages=total_pages,
         is_well_known=1 if is_well_known else 0,
         status="imported",
+        analysis_mode=analysis_mode,
     )
     db.add(book)
     db.commit()
@@ -1219,6 +1221,7 @@ def create_or_update_cover_analysis(db: Session, book_id: int, **fields) -> Cove
         "dominant_motifs", "symbolic_anchors", "cover_mood_keywords",
         "color_palette_direction", "color_palette_structured",
         "cover_role_character_ids", "cover_role_location_ids", "cover_role_artefact_ids",
+        "reference_style_notes",
     }
     row = db.query(CoverAnalysis).filter(CoverAnalysis.book_id == book_id).first()
     if not row:
@@ -1239,6 +1242,32 @@ def create_or_update_cover_analysis(db: Session, book_id: int, **fields) -> Cove
 
 def get_cover_analysis(db: Session, book_id: int) -> Optional[CoverAnalysis]:
     return db.query(CoverAnalysis).filter(CoverAnalysis.book_id == book_id).first()
+
+
+def get_or_create_cover_analysis(db: Session, book_id: int) -> CoverAnalysis:
+    """Get cover analysis by book_id; create if not exists. Returns the row."""
+    row = get_cover_analysis(db, book_id)
+    if row:
+        return row
+    return create_or_update_cover_analysis(db, book_id)
+
+
+def update_cover_analysis(db: Session, cover_analysis_id: int, **fields) -> Optional[CoverAnalysis]:
+    """Update CoverAnalysis by id. Serialises reference_style_notes as JSON."""
+    _json_columns = {"reference_style_notes"}
+    row = db.query(CoverAnalysis).filter(CoverAnalysis.id == cover_analysis_id).first()
+    if not row:
+        return None
+    for key, value in fields.items():
+        if hasattr(row, key):
+            if key in _json_columns and value is not None and isinstance(value, dict):
+                setattr(row, key, _json.dumps(value))
+            else:
+                setattr(row, key, value)
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 # ---------------------------------------------------------------------------

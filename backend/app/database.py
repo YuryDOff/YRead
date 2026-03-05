@@ -116,6 +116,14 @@ def _run_migrations():
     _add_column_if_missing("scenes", "title_display", "TEXT")
     _add_column_if_missing("scenes", "narrative_summary_display", "TEXT")
 
+    # Phase 8a: analysis_mode (simple = characters only, pro = all entities)
+    _add_column_if_missing("books", "analysis_mode", "VARCHAR(20) DEFAULT 'pro'")
+
+    # Phase 8b: I2T reference cover style extraction
+    _add_column_if_missing("cover_analysis", "reference_style_template", "TEXT")
+    _add_column_if_missing("cover_analysis", "reference_style_notes", "TEXT")
+    _add_column_if_missing("cover_analysis", "reference_image_url", "TEXT")
+
     # Phase 1: Four-entity model
     _add_column_if_missing("books", "entity_activations", "TEXT")
     _add_column_if_missing("books", "genre", "TEXT")

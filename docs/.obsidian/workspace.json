@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "65a31d29af375d30",
+        "id": "4092c5b1d36ca2fe",
         "type": "tabs",
         "children": [
           {
-            "id": "0ec5346759b6b6f5",
+            "id": "d116255cf0f12da7",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Noctua_Context_Summary.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "Noctua_Context_Summary"
+              "title": "New tab"
             }
           }
         ]
@@ -41,7 +37,7 @@
               "type": "file-explorer",
               "state": {
                 "sortOrder": "alphabetical",
-                "autoReveal": false
+                "autoReveal": true
               },
               "icon": "lucide-folder-closed",
               "title": "Files"
@@ -74,7 +70,8 @@
               "title": "Bookmarks"
             }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "horizontal",
@@ -183,9 +180,14 @@
       "bases:Create new base": false
     }
   },
-  "active": "0ec5346759b6b6f5",
+  "active": "d116255cf0f12da7",
   "lastOpenFiles": [
-    "suggestions from OpenAI on I2T analysis service.md",
-    "Noctua_Context_Summary.md"
+    "bug_log.md",
+    "design_backlog.md",
+    "Untitled.base",
+    "Noctua_Context_Summary.md",
+    "Noctua_Session2_Final_Checkpoint.md",
+    "Noctua_Strategy_Session2.docx",
+    "suggestions from OpenAI on I2T analysis service.md"
   ]
 }

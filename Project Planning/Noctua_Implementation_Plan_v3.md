@@ -63,6 +63,14 @@ Both tiers run the **identical backend pipeline**. The split is frontend-only:
 - **Phase 5** ✅ Analysis pipeline integration (background tasks, progress tracking).
 - **Phase 6** ✅ Search extensions (Behance, Dribbble providers, entity search routing).
 - **Phase 7** ✅ Bug fixes (BUG-1 is_main collision, BUG-2 scene display count), data model extensions (cover_type, color_palette_structured, primary_cover_*_id, is_selected_for_reference), VB entry endpoints, Cover Studio API, prompt registry + SettingsPage.
+- **Phase 8a** ✅ Analysis engine branch (Simple vs Pro): Book.analysis_mode, BookCreate/BookResponse, POST /api/books, get_entity_types_for_mode in ai_service; _run_analysis_background filters entity_types by book.analysis_mode; 5 unit tests.
+- **Phase 8b** ✅ I2T Analysis Service: I2TAnalysisResult and AnalyzeCoverReferenceRequest schemas; three columns on CoverAnalysis (reference_style_template, reference_style_notes, reference_image_url); i2t_analysis_service.run_i2t_analysis (GPT-4o Vision, cover/illustration); POST /api/books/{id}/analyze-cover-reference; unit tests (mock, empty on failure, mode routing, endpoint stores to DB).
+- **Phase 9** ✅ Prompt Engineering Service + fal.ai FLUX + DALL-E: PromptEngineeringResult schema; prompt_engineering_service.run_prompt_merge (GPT-4o merge, heuristic compatibility, fallback); BaseCoverT2IProvider, T2IGenerationResult in base; FluxKontextProvider (fal-client), DalleProvider; get_cover_t2i_provider() in engine_selector; fal-client in requirements; FAL_API_KEY, COVER_T2I_PROVIDER in .env.example; 9 unit tests.
+- **Phase 9b** ✅ Serper Search Provider: BaseSearchProvider and SearchResult in providers/base; serper_provider (blacklist, watermarked); get_supplementary_search_providers(entity_type) in engine_selector; SERPER_API_KEY in .env.example; 10 unit tests.
+- **Phase 10** ✅ SetupPage + WorkflowNav + FeatureGate: AuthContext (user.plan), FeatureGate + UpgradeBanner, WorkflowNav dual-path (COVER_ONLY_STEPS / FULL_BOOK_STEPS), workflow selector in BookUpload, analysis_mode in manuscripts/upload, new routes (mood-board, cover-brief, studio/cover, studio/text, preview), stub pages MoodBoardPage/CoverStudioPage/TextStudioPage; Vitest + testing-library; 5 unit tests.
+- **Phase 11** ✅ AnalysisReviewPage + CoverBriefEditor: tabs by book.analysis_mode (simple: Characters only; pro: Characters, Locations, Artefacts, Cover), is_main as read-only badge, is_selected_for_reference toggle and updateEntitySelections; CoverBriefEditor (Simple vs Pro layout, Panel A/B, localStorage noctua_panel_a_expanded, FeatureGate for negative prompt); 9 unit tests.
+- **Phase 12** ✅ MoodBoardPage: tabs (Style Reference only for simple; Style Reference | Characters | Locations | Artefacts for pro), cover reference grid, upload, "Search for similar covers", "Analyse style" (explicit, not auto), StyleTemplateSummaryCard, error toast, Continue to Cover Brief; test-wrappers (analysisMode, defaultWrapper, wrapperWithSelectedImage); PATCH cover-analysis creates row if missing; 8 unit tests.
+- **Phase 13** ✅ Cover generation wire-up: cover_prompt_assembler.py (CoverPromptAssembler.assemble fallback); illustrations generate uses _generate_concept_background (run_prompt_merge / CoverPromptAssembler, get_cover_t2i_provider, status generating→complete|failed); CoverStudioPage (poll cover-concepts, concept grid, Select, Regenerate, KDP note, Continue to Typography); TextStudioPage (canvas, title/author/font/color/size, export PNG 2560×1600, FeatureGate custom font); api getCoverConcepts, generateCoverConcepts, selectCoverConcept; 4 CoverStudio + 3 TextStudio unit tests.
 
 ---
 
@@ -91,7 +99,11 @@ Copy this prompt block in full at the start of every Cursor Composer session. Re
 
 ```
 You are implementing a software project called Noctua by following a phased
+<<<<<<< HEAD
 implementation plan. The full plan is in `docs/implementation_plan.md`.
+=======
+implementation plan. The full plan is in `Project Planning/Noctua_implementation_plan_v3.md`.
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 The complete codebase documentation is in `docs/codebase_snapshot.md`.
 
 ════════════════════════════════════════
@@ -173,6 +185,11 @@ e) Section 7 (Frontend Components): add new components and pages
 f) Section 11 (Known Stubs): remove implemented stubs; add new ones
 g) Section 12 (Inter-Service Contracts): update changed data shapes
 
+<<<<<<< HEAD
+=======
+STEP 8 - Mark the relevant section of Project Planning/Noctua_implementation_plan_v3.md as complete and include a short summary.  
+
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 Do not rewrite sections that were not affected by this session.
 
 ════════════════════════════════════════
@@ -199,9 +216,19 @@ CURRENT SESSION
 
 ---
 
+<<<<<<< HEAD
 ## Phase 8a — Analysis Engine Branch (Simple vs. Pro Modes)
 
 **Dependency:** Phase 7 complete
+=======
+## Phase 8a — Analysis Engine Branch (Simple vs. Pro Modes) ✅ Complete
+
+**Dependency:** Phase 7 complete  
+**Status:** ✅ Complete
+
+**Realization summary:** Added `analysis_mode` to Book model (Column, default "pro") and DB migration via `database._run_migrations()`. Introduced `BookCreate` schema and `analysis_mode` on `BookResponse`. New endpoint `POST /api/books` creates a book with optional `analysis_mode`; `crud.create_book` accepts `analysis_mode`. In `ai_service`: `get_entity_types_for_mode(analysis_mode, requested_types)` — simple → `["character"]`, pro → requested_types. In `_run_analysis_background`, entity_types are resolved via this function from `book.analysis_mode`, with "character" mapped to "characters" for the pipeline. Unit tests in `test_analysis_branch.py` (5 tests, all passing). No Alembic; used existing migration pattern.
+
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `backend/app/models.py` — add `analysis_mode` field to Book
 - `backend/app/schemas.py` — add `analysis_mode` to BookCreate, BookRead
@@ -290,6 +317,7 @@ def test_simple_mode_persists(client):
 ```
 
 **Success checklist:**
+<<<<<<< HEAD
 - [ ] `analysis_mode` field present on Book model and schema
 - [ ] POST /api/books accepts `analysis_mode` without breaking existing callers (field is optional, defaults to 'pro')
 - [ ] Simple mode restricts extraction to characters only
@@ -300,6 +328,22 @@ def test_simple_mode_persists(client):
 ## Phase 8b — I2T Analysis Service (Image-to-Text Cover Style Extraction)
 
 **Dependency:** Phase 8a complete
+=======
+- [x] `analysis_mode` field present on Book model and schema
+- [x] POST /api/books accepts `analysis_mode` without breaking existing callers (field is optional, defaults to 'pro')
+- [x] Simple mode restricts extraction to characters only
+- [x] All 5 unit tests passing
+
+---
+
+## Phase 8b — I2T Analysis Service (Image-to-Text Cover Style Extraction) ✅ Complete
+
+**Dependency:** Phase 8a complete
+**Status:** ✅ Complete
+
+**Realization summary:** I2TAnalysisResult and AnalyzeCoverReferenceRequest schemas; three columns on CoverAnalysis (reference_style_template, reference_style_notes, reference_image_url) with migrations; get_or_create_cover_analysis and update_cover_analysis in crud; i2t_analysis_service.run_i2t_analysis (GPT-4o Vision, cover/illustration modes); covers router POST analyze-cover-reference; unit tests (mock response, empty on failure, mode routing, endpoint stores to DB).
+
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `backend/app/services/i2t_analysis_service.py` (new)
 - `backend/app/schemas.py` — add `I2TAnalysisResult`
@@ -633,6 +677,7 @@ def test_endpoint_stores_result_to_db(client, book_id):
 ```
 
 **Success checklist:**
+<<<<<<< HEAD
 - [ ] `I2TAnalysisResult` schema defined and importable
 - [ ] 3 new columns on CoverAnalysis model + migration run
 - [ ] `POST /api/books/{id}/analyze-cover-reference` endpoint live
@@ -645,6 +690,26 @@ def test_endpoint_stores_result_to_db(client, book_id):
 ## Phase 9 — Prompt Engineering Service + fal.ai FLUX Provider + DALL-E Provider
 
 **Dependency:** Phase 8b complete
+=======
+- [x] `I2TAnalysisResult` schema defined and importable
+- [x] 3 new columns on CoverAnalysis model + migration run
+- [x] `POST /api/books/{id}/analyze-cover-reference` endpoint live
+- [x] Empty result returned on Vision failure — no exception propagated
+- [x] Mode param selects correct extraction vocabulary
+- [x] All unit tests passing (mocked API calls)
+
+**Phase 8b complete.** Implemented: I2TAnalysisResult and AnalyzeCoverReferenceRequest schemas; three new columns on CoverAnalysis (reference_style_template, reference_style_notes, reference_image_url) with migrations in database.py; get_or_create_cover_analysis and update_cover_analysis in crud; i2t_analysis_service.run_i2t_analysis (GPT-4o Vision, cover/illustration modes); covers router with POST analyze-cover-reference; unit tests (mock response, empty on failure, mode routing, endpoint stores to DB). Async tests run via asyncio.run (no pytest-asyncio).
+
+---
+
+## Phase 9 — Prompt Engineering Service + fal.ai FLUX Provider + DALL-E Provider ✅ Complete
+
+**Dependency:** Phase 8b complete
+**Status:** ✅ Complete
+
+**Realization summary:** PromptEngineeringResult schema; prompt_engineering_service.run_prompt_merge (style_template + entity + user_instruction → GPT-4o merge, heuristic compatibility, fallback on failure); BaseCoverT2IProvider and T2IGenerationResult in t2i_providers/base; FluxKontextProvider (fal-client, TEXT/KONTEXT endpoints); DalleProvider (DALL-E 3 HD fallback); get_cover_t2i_provider() in engine_selector; fal-client>=0.10.0 in requirements; FAL_API_KEY, COVER_T2I_PROVIDER in .env.example; t2i_providers/__init__.py updated (no FluxProvider in ALL_T2I_PROVIDERS); 9 unit tests in test_prompt_engineering_service.py.
+
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `backend/app/services/prompt_engineering_service.py` (new)
 - `backend/app/services/t2i_providers/flux_provider.py` (replace stub)
@@ -1196,6 +1261,7 @@ def test_engine_selector_returns_dalle_when_no_fal_key(monkeypatch):
 ```
 
 **Success checklist:**
+<<<<<<< HEAD
 - [ ] `PromptEngineeringResult` schema importable
 - [ ] `run_prompt_merge()` function signature matches spec exactly
 - [ ] Anti-tokens always in negative prompt, never in main prompt
@@ -1211,6 +1277,27 @@ def test_engine_selector_returns_dalle_when_no_fal_key(monkeypatch):
 ## Phase 9b — Serper Search Provider
 
 **Dependency:** Phase 7 complete (can run in parallel with Phases 8–9)
+=======
+- [x] `PromptEngineeringResult` schema importable
+- [x] `run_prompt_merge()` function signature matches spec exactly
+- [x] Anti-tokens always in negative prompt, never in main prompt
+- [x] COMPATIBLE / WARNING compatibility check working
+- [x] Fallback result returned on API failure (no exception propagated)
+- [x] FluxKontextProvider uses KONTEXT_ENDPOINT when image_url provided
+- [x] FluxKontextProvider uses TEXT_ENDPOINT when no image_url
+- [x] Engine selector returns Flux when FAL_API_KEY set, DALL-E otherwise
+- [x] All unit tests passing (no real API calls required)
+
+---
+
+## Phase 9b — Serper Search Provider ✅ Complete
+
+**Dependency:** Phase 7 complete (can run in parallel with Phases 8–9)
+**Status:** ✅ Complete
+
+**Realization summary:** BaseSearchProvider and SearchResult added to providers/base.py; serper_provider.py (SerperProvider, hard blacklist, watermarked domains, POST google.serper.dev/images); get_supplementary_search_providers(entity_type) in engine_selector (Serper only for artefact/location); SERPER_API_KEY in .env.example; 10 unit tests in test_serper_provider.py (blacklist, watermark, is_available, search mock, engine selector routing).
+
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `backend/app/services/providers/serper_provider.py` (new)
 - `backend/app/services/engine_selector.py` (add Serper routing)
@@ -1432,6 +1519,7 @@ async def test_watermarked_flag_set_on_stock_photo_domains(monkeypatch, httpx_mo
 ```
 
 **Success checklist:**
+<<<<<<< HEAD
 - [ ] SerperProvider follows `BaseSearchProvider` interface
 - [ ] Hard blacklist filters URLs before adding to results
 - [ ] Watermarked flag set correctly for stock photo domains
@@ -1444,6 +1532,21 @@ async def test_watermarked_flag_set_on_stock_photo_domains(monkeypatch, httpx_mo
 ## Phase 10 — Frontend: SetupPage + WorkflowNav + FeatureGate
 
 **Dependency:** Phase 9 complete (backend API stable before building frontend against it)
+=======
+- [x] SerperProvider follows `BaseSearchProvider` interface
+- [x] Hard blacklist filters URLs before adding to results
+- [x] Watermarked flag set correctly for stock photo domains
+- [x] `is_available()` returns False gracefully when SERPER_API_KEY not set
+- [x] Engine selector returns Serper only for artefact/location entity types
+- [x] All unit tests passing
+
+---
+
+## Phase 10 — Frontend: SetupPage + WorkflowNav + FeatureGate ✅
+
+**Dependency:** Phase 9 complete (backend API stable before building frontend against it)
+**Status:** Complete. AuthContext, FeatureGate, WorkflowNav dual-path, workflow selector in BookUpload, analysis_mode in upload, new routes and stub pages, 5 frontend tests.
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `frontend/src/pages/SetupPage.tsx` (refactor)
 - `frontend/src/pages/UploadPage.tsx` (add workflow mode selector)
@@ -1671,9 +1774,16 @@ test('workflow selector renders Full Book disabled for simple user', () => {
 
 ---
 
+<<<<<<< HEAD
 ## Phase 11 — Frontend: AnalysisReviewPage + CoverBriefEditor
 
 **Dependency:** Phase 10 complete
+=======
+## Phase 11 — Frontend: AnalysisReviewPage + CoverBriefEditor ✅
+
+**Dependency:** Phase 10 complete
+**Status:** Complete. Tabs by analysis_mode, is_main badge + is_selected_for_reference toggle, CoverBriefEditor (Simple/Pro, Panel A/B, localStorage), 9 unit tests.
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 **Files touched:**
 - `frontend/src/pages/AnalysisReviewPage.tsx` (new — full implementation)
 - `frontend/src/components/CoverBriefEditor.tsx` (new)
@@ -1812,7 +1922,11 @@ test('is_selected_for_reference toggle calls entity-selections endpoint', async 
 
 ---
 
+<<<<<<< HEAD
 ## Phase 12 — Frontend: MoodBoardPage
+=======
+## Phase 12 — Frontend: MoodBoardPage ✅
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 
 **Dependency:** Phase 11 complete
 **Files touched:**
@@ -1937,7 +2051,11 @@ test('Analyse style does NOT auto-trigger on image upload', async () => {
 
 ---
 
+<<<<<<< HEAD
 ## Phase 13 — Cover Generation Endpoint Wire-Up + CoverStudioPage + TextStudioPage
+=======
+## Phase 13 — Cover Generation Endpoint Wire-Up + CoverStudioPage + TextStudioPage ✅
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 
 **Dependency:** Phase 12 complete + Phase 9 complete (both must be done)
 **Files touched:**
@@ -2149,7 +2267,11 @@ test('custom font upload gated behind FeatureGate', () => {
 
 ---
 
+<<<<<<< HEAD
 ## Phase 14 — Frontend E2E Tests
+=======
+## Phase 14 — Frontend E2E Tests ✅ COMPLETE
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 
 **Dependency:** Phases 10–13 complete
 **Files touched:**
@@ -2279,10 +2401,19 @@ def test_full_i2t_pipeline(client, book_id):
 ```
 
 **Success checklist:**
+<<<<<<< HEAD
 - [ ] Cover-only E2E passes end-to-end (may stub generation step in CI)
 - [ ] Backend E2E validates I2T → CoverAnalysis storage → generation trigger
 - [ ] All Playwright tests pass locally with `npx playwright test`
 - [ ] Backend E2E tests skip gracefully when API keys not set
+=======
+- [x] Cover-only E2E passes end-to-end (may stub generation step in CI)
+- [x] Backend E2E validates I2T → CoverAnalysis storage → generation trigger
+- [x] All Playwright tests pass locally with `npx playwright test`
+- [x] Backend E2E tests skip gracefully when API keys not set
+
+**Done:** Playwright config, `cover_only_path.spec.ts`, `full_book_path.spec.ts`, fixtures; backend `test_e2e_i2t_pipeline.py` (skipif no OPENAI_API_KEY/FAL_API_KEY). `CoverAnalysisResponse` extended with `reference_style_template`, `reference_style_notes`, `reference_image_url`. Tab/aria and data-testid added for E2E selectors.
+>>>>>>> 9137d41 (NoctuaV1: cover studio, I2T pipeline, Dalle/Serper, e2e tests, planning docs)
 
 ---
 

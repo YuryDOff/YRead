@@ -31,6 +31,8 @@ export interface Book {
   similar_book_title?: string | null;
   genre?: string | null;
   workflow_type?: string | null;
+  /** simple = cover only, pro = full book (Phase 8a) */
+  analysis_mode?: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -72,6 +74,7 @@ export interface Character {
   reference_image_url: string | null;
   selected_reference_urls?: string[];
   is_main: number;
+  is_selected_for_reference?: number;
   full_description?: string | null;
   /** Visual type: man, woman, animal, AI, alien, creature, etc. */
   visual_type?: string | null;
@@ -91,6 +94,7 @@ export interface Location {
   reference_image_url: string | null;
   selected_reference_urls?: string[];
   is_main: number;
+  is_selected_for_reference?: number;
   full_description?: string | null;
   is_well_known_entity?: number | boolean;
   canonical_search_name?: string | null;
@@ -133,7 +137,8 @@ export interface ReferenceImageItem {
   thumbnail?: string;
   width?: number;
   height?: number;
-  source?: 'unsplash' | 'serpapi' | 'user';
+  source?: 'unsplash' | 'serpapi' | 'user' | 'upload';
+  is_selected_for_reference?: number;
 }
 
 export interface ReferenceImages {
@@ -293,12 +298,25 @@ export async function analyzeBook(
     if (status === 'error') {
       throw new Error('Analysis failed. Please try again.');
     }
+    // #region agent log
+    const requestedTypes = Object.keys(progress?.entity_progress ?? {});
+    const computedPercent = progress
+      ? compute_overall_progress(progress.entity_progress ?? {}, requestedTypes)
+      : -1;
+    fetch('http://127.0.0.1:7242/ingest/dce275e5-d588-42b9-8117-b1436b32193a', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e99f89' },
+      body: JSON.stringify({
+        sessionId: 'e99f89',
+        location: 'api.ts:analyzeBook',
+        message: 'poll',
+        data: { progressNull: !progress, requestedTypes, computedPercent, previousPercent },
+        timestamp: Date.now(),
+        hypothesisId: 'H5',
+      }),
+    }).catch(() => {});
+    // #endregion
     if (progress && options?.onProgress) {
-      const requestedTypes = Object.keys(progress.entity_progress ?? {});
-      const computedPercent = compute_overall_progress(
-        progress.entity_progress ?? {},
-        requestedTypes,
-      );
       previousPercent = Math.max(previousPercent, computedPercent);
       options.onProgress(previousPercent, 100, progress.entity_progress ?? undefined);
     }
@@ -342,6 +360,7 @@ export interface Artefact {
   reference_image_url: string | null;
   selected_reference_urls?: string[];
   is_main: number;
+  is_selected_for_reference?: number;
   full_description?: string | null;
   symbolic_role?: string | null;
 }
@@ -573,6 +592,9 @@ export interface CoverAnalysisResponse {
   id: number;
   book_id: number;
   thematic_statement?: string | null;
+  reference_style_template?: string | null;
+  reference_image_url?: string | null;
+  reference_style_notes?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 
@@ -594,7 +616,77 @@ export async function updateCoverAnalysis(
   return data;
 }
 
-export const ENABLED_PROVIDERS_STORAGE_KEY = 'yread_enabled_providers';
+/** I2T analysis result from analyze-cover-reference. */
+export interface I2TAnalysisResult {
+  style_template?: string | null;
+  composition_notes?: string | null;
+  color_palette_extracted?: Record<string, unknown> | null;
+  style_tags?: string[] | null;
+  mood_keywords?: string[] | null;
+  lighting_description?: string | null;
+}
+
+/** Run I2T (GPT-4o Vision) on a cover reference image; stores result in CoverAnalysis. */
+export async function analyzeCoverReference(
+  bookId: number,
+  body: { image_url: string; mode?: 'cover' | 'illustration' },
+): Promise<I2TAnalysisResult> {
+  const { data } = await api.post<I2TAnalysisResult>(
+    `/books/${bookId}/analyze-cover-reference`,
+    { image_url: body.image_url, mode: body.mode ?? 'cover' },
+  );
+  return data;
+}
+
+/** Cover concept (one generated cover variant). */
+export interface CoverConceptResponse {
+  id: number;
+  book_id: number;
+  concept_index: number;
+  prompt_used?: string | null;
+  negative_prompt?: string | null;
+  style_variant?: string | null;
+  image_path?: string | null;
+  status: string;
+  is_selected?: number | null;
+  created_at?: string | null;
+}
+
+export interface CoverConceptGenerateRequest {
+  prompt?: string | null;
+  negative_prompt?: string | null;
+  style_variant?: string | null;
+  concept_count?: number;
+  user_instruction?: string | null;
+}
+
+/** List cover concepts for a book. */
+export async function getCoverConcepts(bookId: number): Promise<CoverConceptResponse[]> {
+  const { data } = await api.get<CoverConceptResponse[]>(`/books/${bookId}/cover-concepts`);
+  return Array.isArray(data) ? data : [];
+}
+
+/** Start cover generation; returns queued concepts with status=generating. Client polls getCoverConcepts. */
+export async function generateCoverConcepts(
+  bookId: number,
+  body?: CoverConceptGenerateRequest | null,
+): Promise<{ queued: number; concepts: CoverConceptResponse[] }> {
+  const { data } = await api.post<{ queued: number; concepts: CoverConceptResponse[] }>(
+    `/books/${bookId}/cover-concepts/generate`,
+    body ?? {},
+  );
+  return data;
+}
+
+/** Set selected cover concept (is_selected=1 for this, 0 for others). */
+export async function selectCoverConcept(bookId: number, conceptId: number): Promise<{ status: string }> {
+  const { data } = await api.post<{ status: string }>(
+    `/books/${bookId}/cover-concepts/${conceptId}/select`,
+  );
+  return data;
+}
+
+export const ENABLED_PROVIDERS_STORAGE_KEY = 'noctua_enabled_providers';
 
 export interface ProviderStatus {
   name: string;

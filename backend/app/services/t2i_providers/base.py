@@ -4,6 +4,37 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class T2IGenerationResult:
+    """Result from cover T2I providers (FLUX Kontext, DALL-E)."""
+    url: str
+    width: int | None = None
+    height: int | None = None
+    model: str = ""
+    prompt_used: str = ""
+    provider: str = ""
+
+
+class BaseCoverT2IProvider(ABC):
+    """Abstract base for cover-generation T2I (FLUX Kontext, DALL-E)."""
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Return True if this provider is configured and ready to use."""
+        ...
+
+    @abstractmethod
+    async def generate(
+        self,
+        prompt: str,
+        image_url: str | None = None,
+        negative_prompt: str | None = None,
+        aspect_ratio: str = "2:3",
+        **kwargs,
+    ) -> T2IGenerationResult:
+        """Generate an image from the given prompt (and optional reference image)."""
+        ...
+
+
+@dataclass
 class T2IRequest:
     prompt: str
     negative_prompt: str = ""
